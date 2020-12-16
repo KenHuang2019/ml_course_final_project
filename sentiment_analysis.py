@@ -2,8 +2,8 @@
 Sentiment analysis
 Ref:
 https://github.com/GoatWang/IIIMaterial/blob/master/08_InformationRetreival/main08.ipynb
+https://www.kaggle.com/anirudha16101/sentiment-analysis
 """
-
 
 import config
 
@@ -18,7 +18,6 @@ from nltk.stem.lancaster import LancasterStemmer
 from nltk.stem import SnowballStemmer
 from nltk.stem import WordNetLemmatizer
 from nltk.corpus import stopwords
-from nltk.stem.porter import PorterStemmer
 from string import punctuation
 
 from os import listdir
@@ -29,11 +28,17 @@ from sklearn.feature_extraction.text import CountVectorizer
 
 from scipy.sparse import csr_matrix, hstack
 
+import tensorflow as tf
+import tensorflow_datasets as tfds
+from tensorflow.keras.preprocessing.sequence import pad_sequences
+
 import keras
 from keras.models import Sequential
 from keras.layers import Dense, Activation
 from keras.callbacks import EarlyStopping, ModelCheckpoint
 from keras import regularizers
+
+import matplotlib.pyplot as plt
 
 def load_data(p):
     """
@@ -41,15 +46,22 @@ def load_data(p):
     """
     file_names = [f for f in listdir(p) if isfile(join(p, f))]
 
-    # 初始化 df
-    df = pd.DataFrame({'text': pd.Series([], dtype='object'), 'label': pd.Series([], dtype='int64')})
+    # # 初始化 df
+    # df = pd.DataFrame({'text': pd.Series([], dtype='object'), 'label': pd.Series([], dtype='int64')})
 
-    # 將 txt 讀入並放入 df
-    for n in file_names:
-        tmp_df = pd.read_table( p + n ,header=None,sep='\t', names=["text", "label"])
-        df = df.append(tmp_df,ignore_index=True)
+    # # 將 txt 讀入並放入 df
+    # for n in file_names:
+    #     tmp_df = pd.read_table( p + n ,header=None,sep='\t', names=["text", "label"])
+    #     df = df.append(tmp_df,ignore_index=True)
     
-    return train_test_split(df['text'], df['label'], test_size=config.TEST_SIZE, random_state=123)
+    # 嘗試切割子資料集
+    df_yelp = pd.read_table( p + file_names[0] ,header=None,sep='\t', names=["text", "label"])
+    df_imdb = pd.read_table( p + file_names[1] ,header=None,sep='\t', names=["text", "label"])
+    df_amazon = pd.read_table( p + file_names[2] ,header=None,sep='\t', names=["text", "label"])
+
+    df = pd.concat([df_amazon,df_yelp,df_imdb])
+
+    return df
 
 def add_feature(X, feature_to_add):
     '''
@@ -58,23 +70,19 @@ def add_feature(X, feature_to_add):
     '''
     return hstack([X, csr_matrix(feature_to_add).T], 'csr')
 
-def main():
+def plot_graphs(history, string, method):
+    plt.plot(history.history[string])
+    plt.plot(history.history['val_'+string])
+    plt.xlabel("Epochs")
+    plt.ylabel(string)
+    plt.legend([string, 'val_'+string])
+    # plt.show()
+    plt.savefig(method + '_' + string + '.png')
+
+def method_1_ann(X_train, X_test, y_train, y_test):
     """
-    英文 NLP - Sentiment analysis
+    嘗試使用ANN做情感預測
     """
-    # 初始化分詞、停用字
-    porter_stemmer = PorterStemmer()
-    stops = stopwords.words('english')
-    
-    # lancaster_stemmer = LancasterStemmer()
-    # snowball_stemmer = SnowballStemmer('english')
-    # wordnet_lemmatizer = WordNetLemmatizer()
-
-    X_train, X_test, y_train, y_test = load_data(config.INPUT_PATH)
-    # print(X_train.shape, y_train.shape, X_test.shape, y_test.shape)
-    print(X_train.shape, y_train.shape, X_test.shape, y_test.shape)
-
-
     vect = CountVectorizer(lowercase=False, token_pattern=r'(?u)\b\w+\b|\,|\.|\;|\:')
 
     X_train_dtm = vect.fit_transform(X_train)
@@ -94,8 +102,8 @@ def main():
 
 
     model=Sequential()
-    model.add(Dense(1024,activation='relu',kernel_regularizer=regularizers.l2(0.01)))  
-    model.add(Dense(256,activation='relu',kernel_regularizer=regularizers.l2(0.01)))
+    model.add(Dense(1024,activation='relu',kernel_regularizer=regularizers.l2(0.1)))  
+    model.add(Dense(256,activation='relu',kernel_regularizer=regularizers.l2(0.1)))
     model.add(Dense(1))
 
     model.compile(optimizer='adam',loss="mse")
@@ -113,16 +121,70 @@ def main():
     print(np.mean(correct_prediction))
 
 
-    # testStr = "This value is also called cut-off in the literature. If float, the parameter represents a proportion of documents, integer absolute counts."
-    # # 請使用nltk.word_tokenize及nltk.wordpunct_tokenize進行分詞，並比較其中差異。
-    # #=============your works starts===============#
-    # word_tokenize_tokens = nltk.word_tokenize(testStr)
-    # wordpunct_tokenize_tokens = nltk.wordpunct_tokenize(testStr)
-    # #==============your works ends================#
+def method_2_LSTM(df):
+    """
+    嘗試做 word to vector 之後使用 LSTM
+    """
+    text = df['text'].tolist()
+    label = df['label'].tolist()
 
-    # print("/".join(word_tokenize_tokens))
-    # print("/".join(wordpunct_tokenize_tokens))
+    # word to vector
+    vocab_size=1000
+    print("vocab size is", vocab_size)
+    tokenizer = tfds.features.text.SubwordTextEncoder.build_from_corpus(text,vocab_size,max_subword_length=5)
+    
+    for i,sent in enumerate(text):
+        text[i] = tokenizer.encode(sent)
 
+    max_length = 50
+
+    text_added = pad_sequences(text,maxlen=max_length,padding ='post',truncating='post')
+
+    # 切分訓練集與測試集
+    training_size=int(len(text)*0.8)
+    train_seq=text_added[:training_size]
+    train_labels=label[:training_size]
+
+    test_seq=text_added[training_size:]
+    test_labels=label[training_size:]
+
+    train_labels=np.array(train_labels)
+    test_labels=np.array(test_labels)
+    print("Total no of Training Sequence are",len(train_seq))
+    print("Total no of Test Sequence are",len(test_seq))
+
+    # Create model
+    embedding_dim = 16
+
+    model=tf.keras.Sequential([
+        tf.keras.layers.Embedding(vocab_size,embedding_dim,input_length=max_length),
+        tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(embedding_dim,return_sequences=True)),
+        tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(embedding_dim)),
+        tf.keras.layers.Dense(6,activation='relu'),
+        tf.keras.layers.Dense(1,activation='sigmoid')
+    ])
+
+    #fit a model
+    model.compile(loss="binary_crossentropy",optimizer='adam',metrics=['accuracy'])
+    model.summary()
+
+    history = model.fit(train_seq,train_labels,epochs=20,validation_data=(test_seq,test_labels))
+
+    plot_graphs(history, "accuracy", 'LSTM')
+    plot_graphs(history, "loss", 'LSTM')
+
+def main():
+    """
+    英文 NLP - Sentiment analysis
+    """
+    df = load_data(config.INPUT_PATH)
+    X_train, X_test, y_train, y_test = train_test_split(df['text'], df['label'], test_size=config.TEST_SIZE, random_state=123)
+    print(X_train.shape, y_train.shape, X_test.shape, y_test.shape)
+
+    # method_1_ann(X_train, X_test, y_train, y_test)
+
+    method_2_LSTM(df.reset_index(drop=True))
+    
 
 if __name__ == "__main__":
     main()
