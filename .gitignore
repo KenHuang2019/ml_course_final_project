@@ -5,3 +5,7 @@ ref/
 __pycache__/
 
 test.py
+
+glove_model/
+
+./model.h5
