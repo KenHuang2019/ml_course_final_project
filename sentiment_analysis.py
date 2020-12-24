@@ -199,7 +199,7 @@ def method_3_Attention(df):
     Attention
     """
     vocab_size = 1000
-    max_length = 40
+    max_length = 50
     x_train, y_train, x_val, y_val = preprocessing(df, vocab_size, max_length)
 
     embed_dim = 40  # Embedding size for each token
