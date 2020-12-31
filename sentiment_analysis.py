@@ -71,7 +71,7 @@ from matplotlib import font_manager
 from itertools import accumulate
 from matplotlib.font_manager import FontProperties
 
-def load_data(p, sub_set_num):
+def load_data(p, sub_set_num=None):
     """
     讀取資料集
     """
@@ -89,12 +89,12 @@ def load_data(p, sub_set_num):
     df_yelp = pd.read_table( p + file_names[0] ,header=None,sep='\t', names=["text", "label"])
     df_imdb = pd.read_table( p + file_names[1] ,header=None,sep='\t', names=["text", "label"])
     df_amazon = pd.read_table( p + file_names[0] ,header=None,sep='\t', names=["text", "label"])
-
     df = pd.concat([df_amazon,df_yelp,df_imdb])
-    # df = df_amazon
-    # df = df_amazon[:sub_set_num] # 切割子資料集
 
-    return df
+    if sub_set_num == None:
+        return df
+    else:
+        return df[:sub_set_num] # 切割子資料集
 
 def add_feature(X, feature_to_add):
     '''
@@ -472,9 +472,11 @@ def main():
     """
     英文 NLP - Sentiment analysis
     """
-    df = load_data(config.INPUT_PATH, 100)
-    X_train, X_test, y_train, y_test = train_test_split(df['text'], df['label'], test_size=config.TEST_SIZE, random_state=123)
-    print(X_train.shape, y_train.shape, X_test.shape, y_test.shape)
+    df = load_data(config.INPUT_PATH)
+    # df = load_data(config.INPUT_PATH, 100)
+
+    # X_train, X_test, y_train, y_test = train_test_split(df['text'], df['label'], test_size=config.TEST_SIZE, random_state=123)
+    # print(X_train.shape, y_train.shape, X_test.shape, y_test.shape)
 
     # method_1_ann(X_train, X_test, y_train, y_test)
 
@@ -486,7 +488,7 @@ def main():
     
     # method_5_SVM(df.reset_index(drop=True))
     
-    # data_analysis(df)
+    data_analysis(df)
 
 if __name__ == "__main__":
     main()
