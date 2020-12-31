@@ -60,6 +60,17 @@ import matplotlib.pyplot as plt
 # Attention
 from multi_head_self_attention import MultiHeadSelfAttention, TransformerBlock, TokenAndPositionEmbedding
 
+# Decision_Tree
+from sklearn import tree
+
+# Support_Vector_Machine
+from sklearn import svm 
+
+# Data Analysis
+from matplotlib import font_manager
+from itertools import accumulate
+from matplotlib.font_manager import FontProperties
+
 def load_data(p, sub_set_num):
     """
     讀取資料集
@@ -75,14 +86,13 @@ def load_data(p, sub_set_num):
     #     df = df.append(tmp_df,ignore_index=True)
     
     # 嘗試切割子資料集
-    # df_yelp = pd.read_table( p + file_names[0] ,header=None,sep='\t', names=["text", "label"])
-    # df_imdb = pd.read_table( p + file_names[1] ,header=None,sep='\t', names=["text", "label"])
+    df_yelp = pd.read_table( p + file_names[0] ,header=None,sep='\t', names=["text", "label"])
+    df_imdb = pd.read_table( p + file_names[1] ,header=None,sep='\t', names=["text", "label"])
     df_amazon = pd.read_table( p + file_names[0] ,header=None,sep='\t', names=["text", "label"])
 
-    # df = pd.concat([df_amazon,df_yelp,df_imdb])
+    df = pd.concat([df_amazon,df_yelp,df_imdb])
     # df = df_amazon
-    df = df_amazon[:sub_set_num]
-    # TODO: 切成 100 筆
+    # df = df_amazon[:sub_set_num] # 切割子資料集
 
     return df
 
@@ -407,13 +417,17 @@ def method_5_SVM(df):
     #print(clf.support_) #支援向量點的索引 
     #print(clf.n_support_) #每個class有幾個支援向量點 
 
-    
 def data_analysis(df):
     """
     資料分析
+    TODO:
+    1.分析正負面資料的數量比對（可能決定是否加權？）
+    2.詞性分析（作為特徵抽取的其中一種特徵？）
+    3.word cloud ?
+    4.用 GloVe 轉成 vector 做 dimensionality reduction 再可視化看 distribution
     """
     # 設定matplotlib繪圖時的字型
-    my_font = FontProperties(fname=r"c:\windows\fonts\simsun.ttc", size=14)
+    # my_font = FontProperties(fname=r"c:\windows\fonts\simsun.ttc", size=14)
     print(df.groupby('label')['label'].count()) #正面500筆負面500筆
     df['length'] = df['text'].apply(lambda x: len(x))
     len_df = df.groupby('length').count()
@@ -421,9 +435,9 @@ def data_analysis(df):
     sent_freq = len_df['text'].tolist()
     # 繪製句子長度及出現頻數統計圖
     plt.bar(sent_length, sent_freq)
-    plt.title("句子長度及出現頻數統計圖", fontproperties=my_font)
-    plt.xlabel("句子長度", fontproperties=my_font)
-    plt.ylabel("句子長度出現的頻數", fontproperties=my_font)
+    plt.title("句子長度及出現頻數統計圖") # , fontproperties=my_font
+    plt.xlabel("句子長度") # , fontproperties=my_font
+    plt.ylabel("句子長度出現的頻數") # , fontproperties=my_font
     plt.savefig("./句子長度及出現頻數統計圖.png")
     plt.close()
 
@@ -467,9 +481,10 @@ def main():
     # method_2_LSTM(df.reset_index(drop=True))
 
     # method_3_Attention(df.reset_index(drop=True))
-    #method_4_decisiontree(df.reset_index(drop=True))
+
+    # method_4_decisiontree(df.reset_index(drop=True))
     
-    #method_5_SVM(df.reset_index(drop=True))
+    # method_5_SVM(df.reset_index(drop=True))
     
     # data_analysis(df)
 
