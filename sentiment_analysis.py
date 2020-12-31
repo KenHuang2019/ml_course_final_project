@@ -86,9 +86,9 @@ def load_data(p, sub_set_num=None):
     #     df = df.append(tmp_df,ignore_index=True)
     
     # 嘗試切割子資料集
-    df_yelp = pd.read_table( p + file_names[0] ,header=None,sep='\t', names=["text", "label"])
-    df_imdb = pd.read_table( p + file_names[1] ,header=None,sep='\t', names=["text", "label"])
-    df_amazon = pd.read_table( p + file_names[0] ,header=None,sep='\t', names=["text", "label"])
+    df_yelp = pd.read_table( p + file_names[0] ,header=None,sep='\t', names=["text", "label"], quoting=3)
+    df_imdb = pd.read_table( p + file_names[1] ,header=None,sep='\t', names=["text", "label"], quoting=3)
+    df_amazon = pd.read_table( p + file_names[0] ,header=None,sep='\t', names=["text", "label"], quoting=3)
     df = pd.concat([df_amazon,df_yelp,df_imdb])
 
     if sub_set_num == None:
@@ -400,7 +400,6 @@ def method_4_decisiontree(df):
     tree.plot_tree(classifier)
     print(classifier.score(test_seq, test_labels))
     
-    
 def method_5_SVM(df):
     """
     嘗試支持向量機
@@ -417,41 +416,59 @@ def method_5_SVM(df):
     #print(clf.support_) #支援向量點的索引 
     #print(clf.n_support_) #每個class有幾個支援向量點 
 
-def data_analysis(df):
+def volume_analysis(df):
     """
-    資料分析
-    TODO:
-    1.分析正負面資料的數量比對（可能決定是否加權？）
-    2.詞性分析（作為特徵抽取的其中一種特徵？）
-    3.word cloud ?
-    4.用 GloVe 轉成 vector 做 dimensionality reduction 再可視化看 distribution
+    資料量分析
     """
-    # 設定matplotlib繪圖時的字型
-    # my_font = FontProperties(fname=r"c:\windows\fonts\simsun.ttc", size=14)
-    print(df.groupby('label')['label'].count()) #正面500筆負面500筆
+    plt.bar(np.arange(2), df.groupby('label')['label'].count(), align='center', alpha=0.5)
+    plt.xticks(np.arange(2), ('positive', 'negative'))
+    plt.ylabel('Volume')
+    plt.title('Data volume analysis')
+    plt.ylim([0, 1600])
+    plt.yticks(np.arange(0, 1600, 500))
+    plt.savefig("./data_volume_analysis.png")
+    plt.close()
+
+def length_analysis(df):
+    """
+    句子長度分析
+    """
     df['length'] = df['text'].apply(lambda x: len(x))
+    
     len_df = df.groupby('length').count()
     sent_length = len_df.index.tolist()
     sent_freq = len_df['text'].tolist()
+    print("sent_length: ", max(sent_length))
+    print("top 5 of sent_length: ", sorted(sent_length, reverse=True)[:5])
+    print("sent_freq: ", max(sent_freq))
+    print("top 5 of sent_freq: ", sorted(sent_freq, reverse=True)[:5])
+
     # 繪製句子長度及出現頻數統計圖
     plt.bar(sent_length, sent_freq)
-    plt.title("句子長度及出現頻數統計圖") # , fontproperties=my_font
-    plt.xlabel("句子長度") # , fontproperties=my_font
-    plt.ylabel("句子長度出現的頻數") # , fontproperties=my_font
-    plt.savefig("./句子長度及出現頻數統計圖.png")
+    plt.title("Sentnece length and frequency") # , fontproperties=my_font
+    plt.xlabel("length") # , fontproperties=my_font
+    plt.ylabel("frequency") # , fontproperties=my_font
+    plt.xlim([0, 480])
+    plt.ylim([0, 55])
+    plt.savefig("./sentnece_length_frequency.png")
     plt.close()
 
-    # 繪製句子長度累積分佈函式(CDF)
+    return sent_length, sent_freq
+
+def length_cdf_analysis(df, sent_length, sent_freq):
+    """
+    句子長度 累積分佈函式 ( CDF, Cumulative Distribution Function )
+    """
     sent_pentage_list = [(count/sum(sent_freq)) for count in accumulate(sent_freq)]
 
     # 繪製CDF
     plt.plot(sent_length, sent_pentage_list)
 
-    # 尋找分位點為quantile的句子長度
-    quantile = 0.91
+    # 尋找分位點為 quantile 的句子長度
+    quantile = 0.950
     #print(list(sent_pentage_list))
     for length, per in zip(sent_length, sent_pentage_list):
-        if round(per, 2) == quantile:
+        if round(per, 3) == quantile:
             index = length
             break
     print("\n分位點為%s的句子長度:%d." % (quantile, index))
@@ -461,19 +478,35 @@ def data_analysis(df):
     plt.vlines(index, 0, quantile, colors="c", linestyles="dashed")
     plt.text(0, quantile, str(quantile))
     plt.text(index, 0, str(index))
-    plt.title("句子長度累積分佈函式圖", fontproperties=my_font)
-    plt.xlabel("句子長度", fontproperties=my_font)
-    plt.ylabel("句子長度累積頻率", fontproperties=my_font)
-    plt.savefig("./句子長度累積分佈函式圖.png")
+    plt.title("Sentence length Cumulative Distribution") # , fontproperties=my_font
+    plt.xlabel("length") # , fontproperties=my_font
+    plt.ylabel("frequency") # , fontproperties=my_font
+    plt.savefig("./length_frequency_cumulative_distribution.png")
     plt.close()
-    print(df)
+
+def data_analysis(df):
+    """
+    資料分析
+    TODO:
+    2.詞性分析（作為特徵抽取的其中一種特徵？）
+    3.word cloud ?
+    4.用 GloVe 轉成 vector 做 dimensionality reduction 再可視化看 distribution
+    """
+    volume_analysis(df)
+
+    sent_length, sent_freq = length_analysis(df)
+
+    length_cdf_analysis(df, sent_length, sent_freq)
 
 def main():
     """
     英文 NLP - Sentiment analysis
     """
     df = load_data(config.INPUT_PATH)
-    # df = load_data(config.INPUT_PATH, 100)
+
+    data_analysis(df)
+
+    # df = load_data(config.INPUT_PATH, 100) # 若想切出幾筆資料直接在第二個參數傳想切割的數量就好
 
     # X_train, X_test, y_train, y_test = train_test_split(df['text'], df['label'], test_size=config.TEST_SIZE, random_state=123)
     # print(X_train.shape, y_train.shape, X_test.shape, y_test.shape)
@@ -487,8 +520,6 @@ def main():
     # method_4_decisiontree(df.reset_index(drop=True))
     
     # method_5_SVM(df.reset_index(drop=True))
-    
-    data_analysis(df)
 
 if __name__ == "__main__":
     main()
