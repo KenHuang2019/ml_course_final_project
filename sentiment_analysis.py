@@ -7,6 +7,14 @@ https://www.kaggle.com/anirudha16101/sentiment-analysis
 Attention:
 https://keras.io/examples/nlp/text_classification_with_transformer/
 https://keras.io/api/optimizers/adam/
+
+在資料分析上嘗試更多種方法，再藉由資料分析結果重新調整參數設定
+
+嘗試將資料集切分成更小的單位，並在不同資料量上觀察不同演算法的成效
+
+在 Transformer 訓練上設定 EarlyStopping
+
+嘗試 dimentionality reduction 看看分佈狀態
 """
 
 import config
@@ -52,7 +60,7 @@ import matplotlib.pyplot as plt
 # Attention
 from multi_head_self_attention import MultiHeadSelfAttention, TransformerBlock, TokenAndPositionEmbedding
 
-def load_data(p):
+def load_data(p, sub_set_num):
     """
     讀取資料集
     """
@@ -69,10 +77,12 @@ def load_data(p):
     # 嘗試切割子資料集
     # df_yelp = pd.read_table( p + file_names[0] ,header=None,sep='\t', names=["text", "label"])
     # df_imdb = pd.read_table( p + file_names[1] ,header=None,sep='\t', names=["text", "label"])
-    df_amazon = pd.read_table( p + file_names[2] ,header=None,sep='\t', names=["text", "label"])
+    df_amazon = pd.read_table( p + file_names[0] ,header=None,sep='\t', names=["text", "label"])
 
     # df = pd.concat([df_amazon,df_yelp,df_imdb])
-    df = df_amazon
+    # df = df_amazon
+    df = df_amazon[:sub_set_num]
+    # TODO: 切成 100 筆
 
     return df
 
@@ -319,6 +329,8 @@ def method_3_Attention(df):
 
     model = keras.Model(inputs=inputs, outputs=outputs)
 
+    print(model.summary())
+
     lr_schedule = keras.optimizers.schedules.ExponentialDecay(
         initial_learning_rate=1e-1,
         decay_steps=5,
@@ -335,7 +347,7 @@ def method_3_Attention(df):
 
     # opt = keras.optimizers.Adam(learning_rate=0.001)
     opt_adam = tf.keras.optimizers.Adam(
-        learning_rate=0.0001,
+        learning_rate=3e-4, # 3e-4
         beta_1=0.85,
         beta_2=0.99,
         epsilon=1e-07,
@@ -365,12 +377,88 @@ def method_3_Attention(df):
     plot_graphs(history, "accuracy", 'Attention')
     plot_graphs(history, "loss", 'Attention')
 
+def method_4_decisiontree(df):
+    """
+    嘗試決策樹
+    """
+    vocab_size = 1000
+    max_length = 50
+    train_seq, train_labels, test_seq, test_labels = preprocessing_split(df, vocab_size, max_length)
+    
+    classifier = tree.DecisionTreeClassifier(criterion='gini',max_depth=9,min_samples_split=2,min_impurity_decrease=0.0,ccp_alpha=0.0 )
+    classifier = classifier.fit(train_seq, train_labels)
+    tree.plot_tree(classifier)
+    print(classifier.score(test_seq, test_labels))
+    
+    
+def method_5_SVM(df):
+    """
+    嘗試支持向量機
+    """
+    vocab_size = 1000
+    max_length = 50
+    train_seq, train_labels, test_seq, test_labels = preprocessing_split(df, vocab_size, max_length)
+    
+    clf=svm.SVC(kernel='poly',C=1,gamma='auto')
+    clf.fit(train_seq, train_labels)
+    print(clf.score(test_seq, test_labels))
+    #print(clf) 
+    #print(clf.support_vectors_) #支援向量點 
+    #print(clf.support_) #支援向量點的索引 
+    #print(clf.n_support_) #每個class有幾個支援向量點 
+
+    
+def data_analysis(df):
+    """
+    資料分析
+    """
+    # 設定matplotlib繪圖時的字型
+    my_font = FontProperties(fname=r"c:\windows\fonts\simsun.ttc", size=14)
+    print(df.groupby('label')['label'].count()) #正面500筆負面500筆
+    df['length'] = df['text'].apply(lambda x: len(x))
+    len_df = df.groupby('length').count()
+    sent_length = len_df.index.tolist()
+    sent_freq = len_df['text'].tolist()
+    # 繪製句子長度及出現頻數統計圖
+    plt.bar(sent_length, sent_freq)
+    plt.title("句子長度及出現頻數統計圖", fontproperties=my_font)
+    plt.xlabel("句子長度", fontproperties=my_font)
+    plt.ylabel("句子長度出現的頻數", fontproperties=my_font)
+    plt.savefig("./句子長度及出現頻數統計圖.png")
+    plt.close()
+
+    # 繪製句子長度累積分佈函式(CDF)
+    sent_pentage_list = [(count/sum(sent_freq)) for count in accumulate(sent_freq)]
+
+    # 繪製CDF
+    plt.plot(sent_length, sent_pentage_list)
+
+    # 尋找分位點為quantile的句子長度
+    quantile = 0.91
+    #print(list(sent_pentage_list))
+    for length, per in zip(sent_length, sent_pentage_list):
+        if round(per, 2) == quantile:
+            index = length
+            break
+    print("\n分位點為%s的句子長度:%d." % (quantile, index))
+    # 繪製句子長度累積分佈函式圖
+    plt.plot(sent_length, sent_pentage_list)
+    plt.hlines(quantile, 0, index, colors="c", linestyles="dashed")
+    plt.vlines(index, 0, quantile, colors="c", linestyles="dashed")
+    plt.text(0, quantile, str(quantile))
+    plt.text(index, 0, str(index))
+    plt.title("句子長度累積分佈函式圖", fontproperties=my_font)
+    plt.xlabel("句子長度", fontproperties=my_font)
+    plt.ylabel("句子長度累積頻率", fontproperties=my_font)
+    plt.savefig("./句子長度累積分佈函式圖.png")
+    plt.close()
+    print(df)
 
 def main():
     """
     英文 NLP - Sentiment analysis
     """
-    df = load_data(config.INPUT_PATH)
+    df = load_data(config.INPUT_PATH, 100)
     X_train, X_test, y_train, y_test = train_test_split(df['text'], df['label'], test_size=config.TEST_SIZE, random_state=123)
     print(X_train.shape, y_train.shape, X_test.shape, y_test.shape)
 
@@ -378,8 +466,12 @@ def main():
 
     # method_2_LSTM(df.reset_index(drop=True))
 
-    method_3_Attention(df.reset_index(drop=True))
+    # method_3_Attention(df.reset_index(drop=True))
+    #method_4_decisiontree(df.reset_index(drop=True))
     
+    #method_5_SVM(df.reset_index(drop=True))
+    
+    # data_analysis(df)
 
 if __name__ == "__main__":
     main()
