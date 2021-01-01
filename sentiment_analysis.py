@@ -19,6 +19,8 @@ https://keras.io/api/optimizers/adam/
 
 import config
 
+import re
+
 import numpy as np
 import pandas as pd
 
@@ -28,8 +30,7 @@ import nltk
 import string
 from nltk.stem.porter import PorterStemmer
 from nltk.stem.lancaster import LancasterStemmer
-from nltk.stem import SnowballStemmer
-from nltk.stem import WordNetLemmatizer
+from nltk.stem import SnowballStemmer, WordNetLemmatizer
 from nltk.corpus import stopwords
 from string import punctuation
 
@@ -38,7 +39,7 @@ from os.path import isfile, join
 
 from sklearn.model_selection import train_test_split, StratifiedKFold
 from sklearn.feature_extraction.text import CountVectorizer
-from sklearn import preprocessing
+from sklearn import preprocessing, tree, svm # Decision_Tree and Support_Vector_Machine
 
 from scipy.sparse import csr_matrix, hstack
 
@@ -55,21 +56,22 @@ from keras.layers import Dense, Activation
 from keras.callbacks import EarlyStopping, ModelCheckpoint
 from keras import regularizers
 
-import matplotlib.pyplot as plt
-
 # Attention
 from multi_head_self_attention import MultiHeadSelfAttention, TransformerBlock, TokenAndPositionEmbedding
 
-# Decision_Tree
-from sklearn import tree
-
-# Support_Vector_Machine
-from sklearn import svm 
-
 # Data Analysis
+import matplotlib.pyplot as plt
+import seaborn as sns
+
 from matplotlib import font_manager
-from itertools import accumulate
 from matplotlib.font_manager import FontProperties
+from itertools import accumulate, chain
+from collections import Counter
+
+eng_stopwords = nltk.corpus.stopwords.words("english")
+sns.set_style("darkgrid", {"axes.facecolor": ".7"})
+sns.set_context(rc = {'patch.linewidth': 0.1})
+cmap = sns.light_palette("#434343") # light:b #69d ch:start=.2,rot=-.3, ch:s=.25,rot=-.25 , dark:salmon_r
 
 def load_data(p, sub_set_num=None):
     """
@@ -420,14 +422,21 @@ def volume_analysis(df):
     """
     資料量分析
     """
-    plt.bar(np.arange(2), df.groupby('label')['label'].count(), align='center', alpha=0.5)
-    plt.xticks(np.arange(2), ('positive', 'negative'))
-    plt.ylabel('Volume')
+    volume_df = pd.DataFrame({
+        "label": ["Positive", "Negative"],
+        "volume": [df['label'].value_counts().loc[1], df['label'].value_counts().loc[0]]
+    })
+    
+    sns.barplot(x='label', y='volume', data=volume_df, palette=cmap)
+    plt.margins(0.02)
+ 
     plt.title('Data volume analysis')
     plt.ylim([0, 1600])
     plt.yticks(np.arange(0, 1600, 500))
-    plt.savefig("./data_volume_analysis.png")
-    plt.close()
+
+    plt.savefig(config.PLOT_PATH + "data_volume_analysis.png")
+    plt.cla()
+    plt.clf()
 
 def length_analysis(df):
     """
@@ -444,14 +453,23 @@ def length_analysis(df):
     print("top 5 of sent_freq: ", sorted(sent_freq, reverse=True)[:5])
 
     # 繪製句子長度及出現頻數統計圖
-    plt.bar(sent_length, sent_freq)
+    tmp_df = pd.DataFrame({
+        "sentence_length": sent_length,
+        "sentence_frequency": sent_freq
+    })
+    
+    sns.barplot(x='sentence_length', y='sentence_frequency', data=tmp_df, palette=cmap)
+    plt.margins(0.02)
+
     plt.title("Sentnece length and frequency") # , fontproperties=my_font
     plt.xlabel("length") # , fontproperties=my_font
     plt.ylabel("frequency") # , fontproperties=my_font
-    plt.xlim([0, 480])
+    # plt.xlim([0, 480])
+    plt.xticks(np.arange(0, max(sent_length), step=20), rotation=90, fontsize=8)
     plt.ylim([0, 55])
-    plt.savefig("./sentnece_length_frequency.png")
-    plt.close()
+    plt.savefig(config.PLOT_PATH + "sentnece_length_frequency.png")
+    plt.cla()
+    plt.clf()
 
     return sent_length, sent_freq
 
@@ -473,21 +491,137 @@ def length_cdf_analysis(df, sent_length, sent_freq):
             break
     print("\n分位點為%s的句子長度:%d." % (quantile, index))
     # 繪製句子長度累積分佈函式圖
-    plt.plot(sent_length, sent_pentage_list)
-    plt.hlines(quantile, 0, index, colors="c", linestyles="dashed")
-    plt.vlines(index, 0, quantile, colors="c", linestyles="dashed")
+    plt.plot(sent_length, sent_pentage_list, 'k')
+    plt.hlines(quantile, 0, index, colors="w", linestyles="dashed")
+    plt.vlines(index, 0, quantile, colors="w", linestyles="dashed")
     plt.text(0, quantile, str(quantile))
     plt.text(index, 0, str(index))
     plt.title("Sentence length Cumulative Distribution") # , fontproperties=my_font
     plt.xlabel("length") # , fontproperties=my_font
     plt.ylabel("frequency") # , fontproperties=my_font
-    plt.savefig("./length_frequency_cumulative_distribution.png")
-    plt.close()
+    plt.savefig(config.PLOT_PATH + "length_frequency_cumulative_distribution.png")
+    plt.cla()
+    plt.clf()
+
+def puncs_stopword_removal_length_analysis(df):
+    """
+    去除標點符號、停用字後的句子長度分析
+    """
+    df['puncs_stopword_removal_length'] = df['text_remove_puncs_remove_stopwords'].apply(lambda x: len(x))
+    
+    len_df = df.groupby('puncs_stopword_removal_length').count()
+    sent_length = len_df.index.tolist()
+    sent_freq = len_df['text_remove_puncs_remove_stopwords'].tolist()
+    print("puncs_stopword_removal_sent_length: ", max(sent_length))
+    print("top 5 of sent_length: ", sorted(sent_length, reverse=True)[:5])
+    print("puncs_stopword_removal_sent_freq: ", max(sent_freq))
+    print("top 5 of sent_freq: ", sorted(sent_freq, reverse=True)[:5])
+
+    # 繪製句子長度及出現頻數統計圖
+    tmp_df = pd.DataFrame({
+        "sentence_length": sent_length,
+        "sentence_frequency": sent_freq
+    })
+
+    # 繪製句子長度及出現頻數統計圖
+    sns.barplot(x='sentence_length', y='sentence_frequency', data=tmp_df, palette=cmap)
+    plt.margins(0.02)
+    # plt.bar(sent_length, sent_freq)
+    plt.title("Sentnece length and frequency") # , fontproperties=my_font
+    plt.xlabel("length") # , fontproperties=my_font
+    plt.ylabel("frequency") # , fontproperties=my_font
+    # plt.xlim([0, 350])
+    plt.xticks(np.arange(0, max(sent_length), step=20), rotation=90, fontsize=8)
+    plt.ylim([0, 85])
+    plt.savefig(config.PLOT_PATH + "puncs_stopword_removal_sentnece_length_frequency.png")
+    plt.cla()
+    plt.clf()
+
+    return sent_length, sent_freq
+
+def puncs_stopword_removal_length_cdf_analysis(df, sent_length, sent_freq):
+    """
+    去除停用字之後的句子長度 累積分佈函式 ( CDF, Cumulative Distribution Function )
+    """
+    sent_pentage_list = [(count/sum(sent_freq)) for count in accumulate(sent_freq)]
+
+    # 繪製CDF
+    plt.plot(sent_length, sent_pentage_list)
+
+    # 尋找分位點為 quantile 的句子長度
+    quantile = 0.95
+    #print(list(sent_pentage_list))
+    for length, per in zip(sent_length, sent_pentage_list):
+        if round(per, 2) == quantile:
+            index = length
+            break
+    print("\n分位點為%s的句子長度:%d." % (quantile, index))
+    # 繪製句子長度累積分佈函式圖
+    plt.plot(sent_length, sent_pentage_list, 'k')
+    plt.hlines(quantile, 0, index, colors="w", linestyles="dashed")
+    plt.vlines(index, 0, quantile, colors="w", linestyles="dashed")
+    plt.text(0, quantile, str(quantile))
+    plt.text(index, 0, str(index))
+    plt.title("Sentence length Cumulative Distribution (Remove stopwords and puncs)") # , fontproperties=my_font
+    plt.xlabel("length") # , fontproperties=my_font
+    plt.ylabel("frequency") # , fontproperties=my_font
+    plt.savefig(config.PLOT_PATH + "puncs_stopword_removal_length_frequency_cumulative_distribution.png")
+    plt.cla()
+    plt.clf()
+
+def remove_eng_stopwords(text):
+    token_text = nltk.word_tokenize(text)
+    remove_stop = [word for word in token_text if word not in eng_stopwords]
+    join_text = ' '.join(remove_stop)
+    return join_text
+
+def punctuation_removal(x):
+    text = x
+    text = text.lower()
+    text = re.sub('\[.*?\]', '', text) # remove square brackets
+    text = re.sub(r'[^\w\s]','',text) # remove punctuation
+    text = re.sub('\w*\d\w*', '', text) # remove words containing numbers
+    text = re.sub('\n', '', text)
+    return text
+
+def find_top_n_common_words(df, top_n):
+    """
+    找出共同使用的字，將其去除可增加每筆資料之間的差異性，更容易區分不同標籤鎖對應到的文本
+    """
+    list_words = df['text_remove_puncs_remove_stopwords'].str.split()
+    list_words_merge = list(chain(*list_words))
+    d = Counter(list_words_merge)
+    common_words_df = pd.DataFrame(data=d, index=['count'])
+    top_common_words = common_words_df.T.sort_values(by=['count'], ascending=False).reset_index().head(top_n)
+
+    plt.figure(figsize=(15,12))
+    sns.barplot(x="index", y='count', data=top_common_words, palette=cmap)
+    plt.xticks(rotation=90,fontsize=8)
+    plt.margins(0.02)
+    plt.savefig(config.PLOT_PATH + "top_" + str(top_n) + "_common_words.png", bbox_inches='tight')
+    plt.cla()
+    plt.clf()
+    return top_common_words
+
+def remove_new_stopwords(text, new_stop_words):
+    token_text = nltk.word_tokenize(text)
+    remove_stop = [word for word in token_text if word not in new_stop_words]
+    join_text = ' '.join(remove_stop)
+    return join_text
+
+def generate_new_stop_words(top_n_common_words):
+    """
+    把太常出現且與情緒無關的字詞找出來作為新的停用詞
+    """
+    common_words_value = top_n_common_words['index'].values
+    remove_words = ['amazing', 'delicious', 'good', 'great', 'like', 'bad', 'best', 'well', 'love', 'nice', 'pretty', 'friendly', 'better', 'disappointed']
+    return [x for x in common_words_value if x not in remove_words]
 
 def data_analysis(df):
     """
     資料分析
     TODO:
+    1.找出共同詞彙
     2.詞性分析（作為特徵抽取的其中一種特徵？）
     3.word cloud ?
     4.用 GloVe 轉成 vector 做 dimensionality reduction 再可視化看 distribution
@@ -497,6 +631,22 @@ def data_analysis(df):
     sent_length, sent_freq = length_analysis(df)
 
     length_cdf_analysis(df, sent_length, sent_freq)
+
+    # 先移除標點符號
+    df['text_remove_puncs'] = df.text.apply(lambda x : punctuation_removal(x))
+    # 再移除停用字
+    df['text_remove_puncs_remove_stopwords'] = df.text_remove_puncs.apply(lambda x : remove_eng_stopwords(x))
+    puncs_stopword_removal_sent_length, puncs_stopword_removal_sent_freq = puncs_stopword_removal_length_analysis(df)
+    puncs_stopword_removal_length_cdf_analysis(df, puncs_stopword_removal_sent_length, puncs_stopword_removal_sent_freq)
+
+    top_n_common_words = find_top_n_common_words(df, 50)
+
+    new_stop_words = generate_new_stop_words(top_n_common_words)
+
+    df['text_remove_new_stopwords'] = df.text_remove_puncs_remove_stopwords.apply(lambda x : remove_new_stopwords(x, new_stop_words))
+
+    with pd.option_context('display.max_rows', None, 'display.max_columns', None):  # more options can be specified also
+        print(df.head(1))
 
 def main():
     """
