@@ -9,3 +9,5 @@ test.py
 glove_model/
 
 ./model.h5
+
+word_cloud_template/

@@ -18,7 +18,6 @@ https://keras.io/api/optimizers/adam/
 """
 
 import config
-
 import re
 
 import numpy as np
@@ -67,6 +66,10 @@ from matplotlib import font_manager
 from matplotlib.font_manager import FontProperties
 from itertools import accumulate, chain
 from collections import Counter
+
+from wordcloud import WordCloud, STOPWORDS
+from PIL import Image
+import random
 
 eng_stopwords = nltk.corpus.stopwords.words("english")
 sns.set_style("darkgrid", {"axes.facecolor": ".7"})
@@ -617,14 +620,118 @@ def generate_new_stop_words(top_n_common_words):
     remove_words = ['amazing', 'delicious', 'good', 'great', 'like', 'bad', 'best', 'well', 'love', 'nice', 'pretty', 'friendly', 'better', 'disappointed']
     return [x for x in common_words_value if x not in remove_words]
 
+def grey_color_func(word, font_size, position, orientation, random_state=None, **kwargs):
+    return "hsl(0, 0%%, %d%%)" % random.randint(60, 100)
+
+def generate_word_cloud(df):
+    """
+    生成正負面的文字雲
+    """
+    positive_text = df[df.label==1]['text_remove_new_stopwords'].values
+    negative_text = df[df.label==0]['text_remove_new_stopwords'].values
+
+    wc = WordCloud(
+        background_color="black", 
+        max_words=10000,
+        stopwords=STOPWORDS, 
+        max_font_size=60,
+        width=800,
+        height=400
+    ).generate(" ".join(positive_text))
+
+    wc.to_file(config.PLOT_PATH + 'positive_word_cloud.png')
+
+    wc = WordCloud(
+        background_color="black", 
+        max_words=10000,
+        stopwords=STOPWORDS, 
+        max_font_size=60,
+        width=800,
+        height=400
+    ).generate(" ".join(negative_text))
+    wc.recolor(color_func=grey_color_func, random_state=3)
+    wc.to_file(config.PLOT_PATH + 'negative_word_cloud.png')
+
+def noun_num(row):
+    """function to give us fraction of noun over total words """
+    text = row['text_remove_new_stopwords']
+    text_splited = text.split(' ')
+    text_splited = [''.join(c for c in s if c not in string.punctuation) for s in text_splited]
+    text_splited = [s for s in text_splited if s]
+    pos_list = nltk.pos_tag(text_splited)
+    noun_count = len([w for w in pos_list if w[1] in ('NN','NNP','NNPS','NNS')])
+    return noun_count
+
+def adj_num(row):
+    """function to give us fraction of adjectives over total words in given text"""
+    text = row['text_remove_new_stopwords']
+    text_splited = text.split(' ')
+    text_splited = [''.join(c for c in s if c not in string.punctuation) for s in text_splited]
+    text_splited = [s for s in text_splited if s]
+    pos_list = nltk.pos_tag(text_splited)
+    adj_count = len([w for w in pos_list if w[1] in ('JJ','JJR','JJS')])
+    return adj_count
+
+def verbs_num(row):
+    """function to give us fraction of verbs over total words in given text"""
+    text = row['text_remove_new_stopwords']
+    text_splited = text.split(' ')
+    text_splited = [''.join(c for c in s if c not in string.punctuation) for s in text_splited]
+    text_splited = [s for s in text_splited if s]
+    pos_list = nltk.pos_tag(text_splited)
+    verbs_count = len([w for w in pos_list if w[1] in ('VB','VBD','VBG','VBN','VBP','VBZ')])
+    return verbs_count
+
+def part_of_speech_analysis(df):
+    """
+    詞性分析
+    """
+    df['noun_num'] = df.apply(lambda row: noun_num(row), axis =1)
+    df['adj_num'] = df.apply(lambda row: adj_num(row), axis =1)
+    df['verbs_num'] = df.apply(lambda row: verbs_num(row), axis =1)
+
+    positive_text = df[df['label']==0]
+    negative_text = df[df['label']==1]
+
+    positive_df = pd.DataFrame({
+        "part_of_speech": ["noun", "adj", "verbs"],
+        "num": [positive_text['noun_num'].sum(), positive_text['adj_num'].sum(), positive_text['verbs_num'].sum()]
+    })
+    
+    sns.barplot(x='part_of_speech', y='num', data=positive_df, palette=cmap)
+    plt.margins(0.02)
+ 
+    plt.title('Part of speech analysis - Positive')
+    plt.ylim([0, 4000])
+    plt.yticks(np.arange(0, 4000, 500))
+    plt.xlabel("part of speech")
+    plt.ylabel("number")
+    plt.savefig(config.PLOT_PATH + "part_of_speech_analysis_positive.png")
+    plt.cla()
+    plt.clf()
+
+    negative_df = pd.DataFrame({
+        "part_of_speech": ["noun", "adj", "verbs"],
+        "num": [negative_text['noun_num'].sum(), negative_text['adj_num'].sum(), negative_text['verbs_num'].sum()]
+    })
+    
+    sns.barplot(x='part_of_speech', y='num', data=negative_df, palette=cmap)
+    plt.margins(0.02)
+ 
+    plt.title('Part of speech analysis - Negative')
+    plt.ylim([0, 4000])
+    plt.yticks(np.arange(0, 4000, 500))
+    plt.xlabel("part of speech")
+    plt.ylabel("number")
+    plt.savefig(config.PLOT_PATH + "part_of_speech_analysis_negative.png")
+    plt.cla()
+    plt.clf()
+
 def data_analysis(df):
     """
     資料分析
     TODO:
-    1.找出共同詞彙
-    2.詞性分析（作為特徵抽取的其中一種特徵？）
-    3.word cloud ?
-    4.用 GloVe 轉成 vector 做 dimensionality reduction 再可視化看 distribution
+    用 GloVe 轉成 vector 做 dimensionality reduction 再可視化看 distribution
     """
     volume_analysis(df)
 
@@ -645,12 +752,18 @@ def data_analysis(df):
 
     df['text_remove_new_stopwords'] = df.text_remove_puncs_remove_stopwords.apply(lambda x : remove_new_stopwords(x, new_stop_words))
 
+    generate_word_cloud(df)
+
+    # 計算不同詞性的數量
+    part_of_speech_analysis(df)
+
     with pd.option_context('display.max_rows', None, 'display.max_columns', None):  # more options can be specified also
         print(df.head(1))
 
 def main():
     """
     英文 NLP - Sentiment analysis
+    # TFIDF 與其他解法可參考：https://www.kaggle.com/abhishek/approaching-almost-any-nlp-problem-on-kaggle
     """
     df = load_data(config.INPUT_PATH)
 
