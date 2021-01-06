@@ -16,9 +16,9 @@ https://keras.io/api/optimizers/adam/
 
 嘗試 dimentionality reduction 看看分佈狀態
 """
-
-import config
 import re
+import config
+import argparse
 from os import listdir
 from os.path import isfile, join
 from datetime import datetime
@@ -487,7 +487,6 @@ def data_analysis(df):
     # 方法二 TF-IDF
     v = TfidfVectorizer()
     tfidf_result = v.fit_transform(df['text_remove_new_stopwords'])
-    # print(type(tfidf_result))
     df['w2v_tfidf'] = tfidf_result.toarray().tolist()
     pca_2d_w2v_tfidf_result, pca_3d_w2v_tfidf_result, tsne_2d_w2v_tfidf_result, tsne_3d_w2v_tfidf_result = w2v_dim_reduction(df['w2v_tfidf'])
     df['pca_2d_w2v_tfidf'] = pca_2d_w2v_tfidf_result.tolist()
@@ -505,12 +504,20 @@ def main():
     """
     英文 NLP - Sentiment analysis
     """
-    df = load_data(config.INPUT_PATH)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-p", "--preprocess", required=False, default="n")
+    args = parser.parse_args()
+    
+    if args.preprocess.lower() == 'y':
+        df = load_data(config.INPUT_PATH)
 
-    # df = load_data(config.INPUT_PATH, 100) # 若想切出幾筆資料直接在第二個參數傳想切割的數量就好
+        processed_df = data_analysis(df)
 
-    processed_df = data_analysis(df)
-
+        processed_df.to_csv ('./processed_data.csv', index = False, header=True)
+    else:
+        print("read processed data CSV")
+        processed_df = pd.read_csv("./processed_data.csv")
+    
     with pd.option_context('display.max_rows', None, 'display.max_columns', None):  # more options can be specified also
         print(processed_df.head(1))
 
