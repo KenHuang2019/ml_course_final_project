@@ -92,7 +92,7 @@ def plot_graphs(history, string, method):
     plt.ylabel(string)
     plt.legend([string, 'val_'+string])
     # plt.show()
-    plt.savefig(method + '_' + string + '.png')
+    plt.savefig('./plot/training/' + method + '_' + string + '.png')
     plt.clf()
 
 #########################################################################################
@@ -138,15 +138,16 @@ def method_1_ann(X_train, X_test, y_train, y_test):
     correct_prediction = np.equal(pred_test_int, y_test.values)
     print(np.mean(correct_prediction))
 
-def preprocessing_split(df, vocab_size, max_length):
+def preprocessing_split(df, target_column, vocab_size, max_length):
     """
     切分訓練集、測試集
     """
-    text = df['text'].tolist()
+    text = df[target_column].tolist()
     label = df['label'].tolist()
 
     # word to vector
-    print("vocab size is", vocab_size)
+    print("vocab size : ", vocab_size)
+    print("max length : ", max_length)
     tokenizer = tfds.features.text.SubwordTextEncoder.build_from_corpus(text,vocab_size,max_subword_length=10)
     
     for i,sent in enumerate(text):
@@ -294,21 +295,62 @@ def method_2_LSTM(df):
     plot_graphs(history, "accuracy", 'LSTM')
     plot_graphs(history, "loss", 'LSTM')
 
-def method_3_Attention(df):
+def method_3_Attention(df, target_column):
     """
     Attention
     """
-    vocab_size = 1000
-    max_length = 50
-    x_train, y_train, x_val, y_val = preprocessing_split(df, vocab_size, max_length)
-    
-    # x_train, y_train, x_val, y_val = preprocessing_glove(df, vocab_size, max_length)# 可用在 SVM or Decision tree
-    
-    # X, Y = preprocessing_no_split(df, vocab_size, max_length)
+    df = df.dropna()
+    TEXT_DATA_COL_NAME = ["text", "text_remove_puncs", "text_remove_puncs", "text_remove_puncs_remove_stopwords", "text_remove_new_stopwords"]
+    if target_column in TEXT_DATA_COL_NAME:
+        unique_words = set()
+        df[target_column].str.lower().str.split().apply(unique_words.update)
 
-    embed_dim = 40  # Embedding size for each token
-    num_heads = 4  # Number of attention heads
-    ff_dim = 40  # Hidden layer size in feed forward network inside transformer
+        vocab_size = len(unique_words)
+        max_length = len(max(df[target_column], key=len).lower().split())
+
+        x_train_val, y_train_val, x_test, y_test = preprocessing_split(df, target_column, vocab_size, max_length)
+
+        # 把訓練集切分出一些作為驗證集
+        training_size = int(len(x_train_val)*0.8)
+
+        x_train = x_train_val[:training_size]
+        x_val = x_train_val[training_size:]
+        y_train = y_train_val[:training_size]
+        y_val = y_train_val[training_size:]
+
+    else: # 已經做完 word to vector
+        vectors = df[target_column].apply(lambda x: 
+                           np.fromstring(
+                               x.replace('\n','')
+                                .replace('[','')
+                                .replace(']','')
+                                .replace('  ',' '), sep=' ')).astype('float32')
+
+        label = np.array(df['label'].tolist()).astype('float32')
+        
+        # 把訓練集切分出一些作為測試集
+        training_val_size = int(len(df)*0.8)
+
+        x_train_val = vectors[:training_val_size]
+        x_test = vectors[training_val_size:]
+
+        x_train = x_train_val[:training_val_size]
+        x_val = x_train_val[training_val_size:]
+
+        y_train_val = label[:training_val_size]
+        y_test = label[training_val_size:]
+
+        y_train = y_train_val[:training_val_size]
+        y_val = y_train_val[training_val_size:]
+
+        vocab_size = 100
+        max_length = 100
+    
+    # print("train[0]", x_train[0])
+
+    embed_dim = 12  # Embedding size for each token
+    num_heads = 6  # Number of attention heads
+    ff_dim = 8  # Hidden layer size in feed forward network inside transformer
 
     inputs = layers.Input(shape=(max_length,))
     embedding_layer = TokenAndPositionEmbedding(max_length, vocab_size, embed_dim)
@@ -316,28 +358,35 @@ def method_3_Attention(df):
     transformer_block = TransformerBlock(embed_dim, num_heads, ff_dim)
     x = transformer_block(x)
     x = layers.GlobalAveragePooling1D()(x)
-    x = layers.Dropout(0.2)(x)
-    x = layers.Dense(20, activation="relu")(x)
-    x = layers.Dropout(0.1)(x)
+    x = layers.Dropout(0.95)(x)
+    x = layers.BatchNormalization()(x)
+    # x = layers.Dense(8)(x)
+    # x = layers.LeakyReLU()(x)
+    # x = layers.Dropout(0.6)(x)
+    # x = layers.BatchNormalization()(x)
+    # x = layers.Dense(4)(x)
+    # x = layers.LeakyReLU()(x)
+    # x = layers.Dropout(0.6)(x)
+    # x = layers.BatchNormalization()(x)
     outputs = layers.Dense(2, activation="softmax")(x)
 
     model = keras.Model(inputs=inputs, outputs=outputs)
 
     print(model.summary())
 
-    lr_schedule = keras.optimizers.schedules.ExponentialDecay(
-        initial_learning_rate=1e-1,
-        decay_steps=5,
-        decay_rate=0.9
-    )
-    opt_sgd = keras.optimizers.SGD(learning_rate=lr_schedule, momentum=0.5)
+    # lr_schedule = keras.optimizers.schedules.ExponentialDecay(
+    #     initial_learning_rate=1e-1,
+    #     decay_steps=5,
+    #     decay_rate=0.9
+    # )
+    # opt_sgd = keras.optimizers.SGD(learning_rate=lr_schedule, momentum=0.5)
 
-    opt_adagrad = tf.keras.optimizers.Adagrad(
-        learning_rate=0.0001,
-        initial_accumulator_value=0.1,
-        epsilon=1e-07,
-        name="Adagrad",
-    )
+    # opt_adagrad = tf.keras.optimizers.Adagrad(
+    #     learning_rate=0.0001,
+    #     initial_accumulator_value=0.1,
+    #     epsilon=1e-07,
+    #     name="Adagrad",
+    # )
 
     # opt = keras.optimizers.Adam(learning_rate=0.001)
     opt_adam = tf.keras.optimizers.Adam(
@@ -349,16 +398,17 @@ def method_3_Attention(df):
         name="Adam"
     )
 
-    opt_adadelta = tf.keras.optimizers.Adadelta(
-        learning_rate=0.1, rho=0.9, epsilon=1e-07, name="Adadelta"
-    )
+    # opt_adadelta = tf.keras.optimizers.Adadelta(
+    #     learning_rate=0.1, rho=0.9, epsilon=1e-07, name="Adadelta"
+    # )
+
     # loss: categorical_crossentropy, sparse_categorical_crossentropy
     model.compile(optimizer=opt_adam, loss="sparse_categorical_crossentropy", metrics=["accuracy"])
     
-    # model.compile("adam", "binary_crossentropy", metrics=["accuracy"])
+    # model.compile(optimizer=opt_adam, loss="binary_crossentropy", metrics=["accuracy"])
     
     history = model.fit(
-        x_train, y_train, batch_size=32, epochs=60, validation_data=(x_val, y_val)#,callbacks=my_callbacks
+        x_train, y_train, batch_size=256, epochs=200, validation_data=(x_val, y_val)#,callbacks=my_callbacks
     )
 
     # model.save('./model.h5')
@@ -507,7 +557,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-p", "--preprocess", required=False, default="n")
     args = parser.parse_args()
-    
+
     if args.preprocess.lower() == 'y':
         df = load_data(config.INPUT_PATH)
 
@@ -518,8 +568,8 @@ def main():
         print("read processed data CSV")
         processed_df = pd.read_csv("./processed_data.csv")
     
-    with pd.option_context('display.max_rows', None, 'display.max_columns', None):  # more options can be specified also
-        print(processed_df.head(1))
+    # with pd.option_context('display.max_rows', None, 'display.max_columns', None):  # more options can be specified also
+    #     print(processed_df.head(1))
 
     # X_train, X_test, y_train, y_test = train_test_split(df['text'], df['label'], test_size=config.TEST_SIZE, random_state=123)
     # print(X_train.shape, y_train.shape, X_test.shape, y_test.shape)
@@ -527,8 +577,13 @@ def main():
     # method_1_ann(X_train, X_test, y_train, y_test)
 
     # method_2_LSTM(df.reset_index(drop=True))
-
-    # method_3_Attention(df.reset_index(drop=True))
+    
+    # method_3_Attention(processed_df.reset_index(drop=True), "text")
+    # method_3_Attention(processed_df.reset_index(drop=True), "text_remove_puncs")
+    method_3_Attention(processed_df.reset_index(drop=True), "text_remove_puncs_remove_stopwords")
+    # method_3_Attention(processed_df.reset_index(drop=True), "text_remove_new_stopwords")
+    # method_3_Attention(processed_df.reset_index(drop=True), "w2v_glove")
+    # method_3_Attention(processed_df.reset_index(drop=True), "w2v_tfidf")
 
     # method_4_decisiontree(df.reset_index(drop=True))
     
