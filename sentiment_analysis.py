@@ -19,11 +19,13 @@ https://keras.io/api/optimizers/adam/
 
 import config
 import re
+from os import listdir
+from os.path import isfile, join
+from datetime import datetime
 
 import numpy as np
 import pandas as pd
-
-from datetime import datetime
+from scipy.sparse import csr_matrix, hstack
 
 import nltk
 import string
@@ -33,43 +35,27 @@ from nltk.stem import SnowballStemmer, WordNetLemmatizer
 from nltk.corpus import stopwords
 from string import punctuation
 
-from os import listdir
-from os.path import isfile, join
-
 from sklearn.model_selection import train_test_split, StratifiedKFold
-from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
 from sklearn import preprocessing, tree, svm # Decision_Tree and Support_Vector_Machine
-
-from scipy.sparse import csr_matrix, hstack
 
 import tensorflow as tf
 import tensorflow_datasets as tfds
-from tensorflow.keras.preprocessing.sequence import pad_sequences
-
 from tensorflow import keras
 from tensorflow.keras import layers
+from tensorflow.keras.preprocessing.sequence import pad_sequences
 
 import keras
+from keras import regularizers
 from keras.models import Sequential
 from keras.layers import Dense, Activation
 from keras.callbacks import EarlyStopping, ModelCheckpoint
-from keras import regularizers
 
 # Attention
 from multi_head_self_attention import MultiHeadSelfAttention, TransformerBlock, TokenAndPositionEmbedding
 
-# Data Analysis
-import matplotlib.pyplot as plt
-import seaborn as sns
-
-from matplotlib import font_manager
-from matplotlib.font_manager import FontProperties
-from itertools import accumulate, chain
-from collections import Counter
-
-from wordcloud import WordCloud, STOPWORDS
-from PIL import Image
-import random
+# data analysis
+from data_analysis_func import *
 
 eng_stopwords = nltk.corpus.stopwords.words("english")
 sns.set_style("darkgrid", {"axes.facecolor": ".7"})
@@ -82,15 +68,6 @@ def load_data(p, sub_set_num=None):
     """
     file_names = [f for f in listdir(p) if isfile(join(p, f))]
 
-    # # 初始化 df
-    # df = pd.DataFrame({'text': pd.Series([], dtype='object'), 'label': pd.Series([], dtype='int64')})
-
-    # # 將 txt 讀入並放入 df
-    # for n in file_names:
-    #     tmp_df = pd.read_table( p + n ,header=None,sep='\t', names=["text", "label"])
-    #     df = df.append(tmp_df,ignore_index=True)
-    
-    # 嘗試切割子資料集
     df_yelp = pd.read_table( p + file_names[0] ,header=None,sep='\t', names=["text", "label"], quoting=3)
     df_imdb = pd.read_table( p + file_names[1] ,header=None,sep='\t', names=["text", "label"], quoting=3)
     df_amazon = pd.read_table( p + file_names[0] ,header=None,sep='\t', names=["text", "label"], quoting=3)
@@ -117,6 +94,8 @@ def plot_graphs(history, string, method):
     # plt.show()
     plt.savefig(method + '_' + string + '.png')
     plt.clf()
+
+#########################################################################################
 
 def method_1_ann(X_train, X_test, y_train, y_test):
     """
@@ -161,7 +140,7 @@ def method_1_ann(X_train, X_test, y_train, y_test):
 
 def preprocessing_split(df, vocab_size, max_length):
     """
-    docstring
+    切分訓練集、測試集
     """
     text = df['text'].tolist()
     label = df['label'].tolist()
@@ -204,12 +183,12 @@ def doc2vec(doc, word2vec):
         # 使用剛剛定義好的tokenize函式tokenize doc，並指派到terms
         # 找出每一個詞彙的代表向量(word2vec)
         # 並平均(element-wise)所有出現的詞彙向量(注意axis=0)，作為doc的代表向量
-        terms = tokenize(doc)  ## 把類別tokenize成一個個的詞彙
+        terms = tokenize(doc)  # 把類別tokenize成一個個的詞彙
         termvecs = [word2vec.get(term) for term in terms if term in word2vec.keys()]
         docvec = np.average(np.array(termvecs), axis=0)
     
     if np.sum(np.isnan(docvec)) > 0:
-        ## 若找不到對應的詞向量，則給一條全部為零的向量，長度為原詞彙代表向量的長度(vec_dimensions)
+        # 若找不到對應的詞向量，則給一條全部為零的向量，長度為原詞彙代表向量的長度(vec_dimensions)
         docvec=np.zeros(100, )  ## 先初始化一條向量，如果某個類別裡面的字都沒有在字典裡，那麼會回傳這條向量
     return docvec
 
@@ -222,12 +201,12 @@ def preprocessing_glove(df, vocab_size, max_length):
     word_vec_mapping = {}
     path = "./glove_model/glove.twitter.27B.100d.txt"
     # 打開上述檔案，並將每一行中的第一個詞作為key，後面的數字做為向量，加入到word_vec_mapping
-    with open(path, 'r', encoding='utf8') as f:  ## 這個文檔的格式是一行一個字並配上他的向量，以空白鍵分隔
+    with open(path, 'r', encoding='utf8') as f:  # 這個文檔的格式是一行一個字並配上他的向量，以空白鍵分隔
         for line in f:  
             tokens = line.split()
-            token = tokens[0]  ## 第一個token就是詞彙
-            vec = tokens[1:]  ## 後面的token向量
-            word_vec_mapping[token] = np.array(vec, dtype=np.float32)  ## 把整個model做成一個字典，以利查找字對應的向量
+            token = tokens[0]  # 第一個token就是詞彙
+            vec = tokens[1:]  # 後面的token向量
+            word_vec_mapping[token] = np.array(vec, dtype=np.float32) # 把整個model做成一個字典，以利查找字對應的向量
 
     # vec_dimensions = len(word_vec_mapping.get('men'))
     # print("vec_dimensions:", vec_dimensions)
@@ -283,7 +262,7 @@ def preprocessing_no_split(df, vocab_size, max_length):
 
 def method_2_LSTM(df):
     """
-    嘗試做 word to vector 之後使用 LSTM
+    做 word to vector 之後使用 LSTM
     """
     vocab_size = 1000
     max_length = 50
@@ -394,7 +373,7 @@ def method_3_Attention(df):
 
 def method_4_decisiontree(df):
     """
-    嘗試決策樹
+    決策樹
     """
     vocab_size = 1000
     max_length = 50
@@ -407,7 +386,7 @@ def method_4_decisiontree(df):
     
 def method_5_SVM(df):
     """
-    嘗試支持向量機
+    支持向量機
     """
     vocab_size = 1000
     max_length = 50
@@ -421,317 +400,49 @@ def method_5_SVM(df):
     #print(clf.support_) #支援向量點的索引 
     #print(clf.n_support_) #每個class有幾個支援向量點 
 
-def volume_analysis(df):
+def method_6_kag_ANN(df):
     """
-    資料量分析
+    試試看kag的模型，莫名跑出89.5%
     """
-    volume_df = pd.DataFrame({
-        "label": ["Positive", "Negative"],
-        "volume": [df['label'].value_counts().loc[1], df['label'].value_counts().loc[0]]
-    })
+    # 先移除標點符號
+    df['text_remove_puncs'] = df.text.apply(lambda x : punctuation_removal(x))
+    # 再移除停用字
+    df['text_remove_puncs_remove_stopwords'] = df.text_remove_puncs.apply(lambda x : remove_eng_stopwords(x))
     
-    sns.barplot(x='label', y='volume', data=volume_df, palette=cmap)
-    plt.margins(0.02)
- 
-    plt.title('Data volume analysis')
-    plt.ylim([0, 1600])
-    plt.yticks(np.arange(0, 1600, 500))
-
-    plt.savefig(config.PLOT_PATH + "data_volume_analysis.png")
-    plt.cla()
-    plt.clf()
-
-def length_analysis(df):
-    """
-    句子長度分析
-    """
-    df['length'] = df['text'].apply(lambda x: len(x))
+    X_train, X_test, y_train, y_test = train_test_split(df['text_remove_puncs_remove_stopwords'], df['label'], test_size=config.TEST_SIZE, random_state=123)
+    print(X_train.shape, y_train.shape, X_test.shape, y_test.shape)
     
-    len_df = df.groupby('length').count()
-    sent_length = len_df.index.tolist()
-    sent_freq = len_df['text'].tolist()
-    print("sent_length: ", max(sent_length))
-    print("top 5 of sent_length: ", sorted(sent_length, reverse=True)[:5])
-    print("sent_freq: ", max(sent_freq))
-    print("top 5 of sent_freq: ", sorted(sent_freq, reverse=True)[:5])
-
-    # 繪製句子長度及出現頻數統計圖
-    tmp_df = pd.DataFrame({
-        "sentence_length": sent_length,
-        "sentence_frequency": sent_freq
-    })
+    vect = TfidfVectorizer()
     
-    sns.barplot(x='sentence_length', y='sentence_frequency', data=tmp_df, palette=cmap)
-    plt.margins(0.02)
+    X_train_dtm = vect.fit_transform(X_train)
+    X_test_dtm = vect.transform(X_test)
+    X_train_dense = X_train_dtm.todense()
+    #X_test_dense = X_test_dtm.todense()
+    print(X_train_dense.shape)
+    y_train = to_categorical(y_train, num_classes=2)
+    y_test = to_categorical(y_test, num_classes=2)
+    #沒有加入batchnormalization也可以到87%
+    model=Sequential([
+        Dense(128,activation='relu'),
+        Dropout(0.25),
+        BatchNormalization(),
+        Dense(64,activation='relu'),
+        Dropout(0.25),
+        BatchNormalization(),
+        Dense(2,activation='sigmoid')
+    ])
 
-    plt.title("Sentnece length and frequency") # , fontproperties=my_font
-    plt.xlabel("length") # , fontproperties=my_font
-    plt.ylabel("frequency") # , fontproperties=my_font
-    # plt.xlim([0, 480])
-    plt.xticks(np.arange(0, max(sent_length), step=20), rotation=90, fontsize=8)
-    plt.ylim([0, 55])
-    plt.savefig(config.PLOT_PATH + "sentnece_length_frequency.png")
-    plt.cla()
-    plt.clf()
+    model.compile(optimizer='adam',loss="binary_crossentropy",metrics=['accuracy'])
+    earlystopper = EarlyStopping(monitor='val_loss', patience=6, verbose=0)
+    checkpoint =ModelCheckpoint(str(datetime.now().strftime("%d-%m-%Y_%H-%M-%S"))+".hdf5",save_best_only=True)
+    callback_list=[earlystopper,checkpoint]
+    history=model.fit(X_train_dense, y_train, epochs=100, batch_size=config.BATCH_SIZE,validation_split=config.VALIDATION_SIZE,callbacks=callback_list)
 
-    return sent_length, sent_freq
-
-def length_cdf_analysis(df, sent_length, sent_freq):
-    """
-    句子長度 累積分佈函式 ( CDF, Cumulative Distribution Function )
-    """
-    sent_pentage_list = [(count/sum(sent_freq)) for count in accumulate(sent_freq)]
-
-    # 繪製CDF
-    plt.plot(sent_length, sent_pentage_list)
-
-    # 尋找分位點為 quantile 的句子長度
-    quantile = 0.950
-    #print(list(sent_pentage_list))
-    for length, per in zip(sent_length, sent_pentage_list):
-        if round(per, 3) == quantile:
-            index = length
-            break
-    print("\n分位點為%s的句子長度:%d." % (quantile, index))
-    # 繪製句子長度累積分佈函式圖
-    plt.plot(sent_length, sent_pentage_list, 'k')
-    plt.hlines(quantile, 0, index, colors="w", linestyles="dashed")
-    plt.vlines(index, 0, quantile, colors="w", linestyles="dashed")
-    plt.text(0, quantile, str(quantile))
-    plt.text(index, 0, str(index))
-    plt.title("Sentence length Cumulative Distribution") # , fontproperties=my_font
-    plt.xlabel("length") # , fontproperties=my_font
-    plt.ylabel("frequency") # , fontproperties=my_font
-    plt.savefig(config.PLOT_PATH + "length_frequency_cumulative_distribution.png")
-    plt.cla()
-    plt.clf()
-
-def puncs_stopword_removal_length_analysis(df):
-    """
-    去除標點符號、停用字後的句子長度分析
-    """
-    df['puncs_stopword_removal_length'] = df['text_remove_puncs_remove_stopwords'].apply(lambda x: len(x))
-    
-    len_df = df.groupby('puncs_stopword_removal_length').count()
-    sent_length = len_df.index.tolist()
-    sent_freq = len_df['text_remove_puncs_remove_stopwords'].tolist()
-    print("puncs_stopword_removal_sent_length: ", max(sent_length))
-    print("top 5 of sent_length: ", sorted(sent_length, reverse=True)[:5])
-    print("puncs_stopword_removal_sent_freq: ", max(sent_freq))
-    print("top 5 of sent_freq: ", sorted(sent_freq, reverse=True)[:5])
-
-    # 繪製句子長度及出現頻數統計圖
-    tmp_df = pd.DataFrame({
-        "sentence_length": sent_length,
-        "sentence_frequency": sent_freq
-    })
-
-    # 繪製句子長度及出現頻數統計圖
-    sns.barplot(x='sentence_length', y='sentence_frequency', data=tmp_df, palette=cmap)
-    plt.margins(0.02)
-    # plt.bar(sent_length, sent_freq)
-    plt.title("Sentnece length and frequency") # , fontproperties=my_font
-    plt.xlabel("length") # , fontproperties=my_font
-    plt.ylabel("frequency") # , fontproperties=my_font
-    # plt.xlim([0, 350])
-    plt.xticks(np.arange(0, max(sent_length), step=20), rotation=90, fontsize=8)
-    plt.ylim([0, 85])
-    plt.savefig(config.PLOT_PATH + "puncs_stopword_removal_sentnece_length_frequency.png")
-    plt.cla()
-    plt.clf()
-
-    return sent_length, sent_freq
-
-def puncs_stopword_removal_length_cdf_analysis(df, sent_length, sent_freq):
-    """
-    去除停用字之後的句子長度 累積分佈函式 ( CDF, Cumulative Distribution Function )
-    """
-    sent_pentage_list = [(count/sum(sent_freq)) for count in accumulate(sent_freq)]
-
-    # 繪製CDF
-    plt.plot(sent_length, sent_pentage_list)
-
-    # 尋找分位點為 quantile 的句子長度
-    quantile = 0.95
-    #print(list(sent_pentage_list))
-    for length, per in zip(sent_length, sent_pentage_list):
-        if round(per, 2) == quantile:
-            index = length
-            break
-    print("\n分位點為%s的句子長度:%d." % (quantile, index))
-    # 繪製句子長度累積分佈函式圖
-    plt.plot(sent_length, sent_pentage_list, 'k')
-    plt.hlines(quantile, 0, index, colors="w", linestyles="dashed")
-    plt.vlines(index, 0, quantile, colors="w", linestyles="dashed")
-    plt.text(0, quantile, str(quantile))
-    plt.text(index, 0, str(index))
-    plt.title("Sentence length Cumulative Distribution (Remove stopwords and puncs)") # , fontproperties=my_font
-    plt.xlabel("length") # , fontproperties=my_font
-    plt.ylabel("frequency") # , fontproperties=my_font
-    plt.savefig(config.PLOT_PATH + "puncs_stopword_removal_length_frequency_cumulative_distribution.png")
-    plt.cla()
-    plt.clf()
-
-def remove_eng_stopwords(text):
-    token_text = nltk.word_tokenize(text)
-    remove_stop = [word for word in token_text if word not in eng_stopwords]
-    join_text = ' '.join(remove_stop)
-    return join_text
-
-def punctuation_removal(x):
-    text = x
-    text = text.lower()
-    text = re.sub('\[.*?\]', '', text) # remove square brackets
-    text = re.sub(r'[^\w\s]','',text) # remove punctuation
-    text = re.sub('\w*\d\w*', '', text) # remove words containing numbers
-    text = re.sub('\n', '', text)
-    return text
-
-def find_top_n_common_words(df, top_n):
-    """
-    找出共同使用的字，將其去除可增加每筆資料之間的差異性，更容易區分不同標籤鎖對應到的文本
-    """
-    list_words = df['text_remove_puncs_remove_stopwords'].str.split()
-    list_words_merge = list(chain(*list_words))
-    d = Counter(list_words_merge)
-    common_words_df = pd.DataFrame(data=d, index=['count'])
-    top_common_words = common_words_df.T.sort_values(by=['count'], ascending=False).reset_index().head(top_n)
-
-    plt.figure(figsize=(15,12))
-    sns.barplot(x="index", y='count', data=top_common_words, palette=cmap)
-    plt.xticks(rotation=90,fontsize=8)
-    plt.margins(0.02)
-    plt.savefig(config.PLOT_PATH + "top_" + str(top_n) + "_common_words.png", bbox_inches='tight')
-    plt.cla()
-    plt.clf()
-    return top_common_words
-
-def remove_new_stopwords(text, new_stop_words):
-    token_text = nltk.word_tokenize(text)
-    remove_stop = [word for word in token_text if word not in new_stop_words]
-    join_text = ' '.join(remove_stop)
-    return join_text
-
-def generate_new_stop_words(top_n_common_words):
-    """
-    把太常出現且與情緒無關的字詞找出來作為新的停用詞
-    """
-    common_words_value = top_n_common_words['index'].values
-    remove_words = ['amazing', 'delicious', 'good', 'great', 'like', 'bad', 'best', 'well', 'love', 'nice', 'pretty', 'friendly', 'better', 'disappointed']
-    return [x for x in common_words_value if x not in remove_words]
-
-def grey_color_func(word, font_size, position, orientation, random_state=None, **kwargs):
-    return "hsl(0, 0%%, %d%%)" % random.randint(60, 100)
-
-def generate_word_cloud(df):
-    """
-    生成正負面的文字雲
-    """
-    positive_text = df[df.label==1]['text_remove_new_stopwords'].values
-    negative_text = df[df.label==0]['text_remove_new_stopwords'].values
-
-    wc = WordCloud(
-        background_color="black", 
-        max_words=10000,
-        stopwords=STOPWORDS, 
-        max_font_size=60,
-        width=800,
-        height=400
-    ).generate(" ".join(positive_text))
-
-    wc.to_file(config.PLOT_PATH + 'positive_word_cloud.png')
-
-    wc = WordCloud(
-        background_color="black", 
-        max_words=10000,
-        stopwords=STOPWORDS, 
-        max_font_size=60,
-        width=800,
-        height=400
-    ).generate(" ".join(negative_text))
-    wc.recolor(color_func=grey_color_func, random_state=3)
-    wc.to_file(config.PLOT_PATH + 'negative_word_cloud.png')
-
-def noun_num(row):
-    """function to give us fraction of noun over total words """
-    text = row['text_remove_new_stopwords']
-    text_splited = text.split(' ')
-    text_splited = [''.join(c for c in s if c not in string.punctuation) for s in text_splited]
-    text_splited = [s for s in text_splited if s]
-    pos_list = nltk.pos_tag(text_splited)
-    noun_count = len([w for w in pos_list if w[1] in ('NN','NNP','NNPS','NNS')])
-    return noun_count
-
-def adj_num(row):
-    """function to give us fraction of adjectives over total words in given text"""
-    text = row['text_remove_new_stopwords']
-    text_splited = text.split(' ')
-    text_splited = [''.join(c for c in s if c not in string.punctuation) for s in text_splited]
-    text_splited = [s for s in text_splited if s]
-    pos_list = nltk.pos_tag(text_splited)
-    adj_count = len([w for w in pos_list if w[1] in ('JJ','JJR','JJS')])
-    return adj_count
-
-def verbs_num(row):
-    """function to give us fraction of verbs over total words in given text"""
-    text = row['text_remove_new_stopwords']
-    text_splited = text.split(' ')
-    text_splited = [''.join(c for c in s if c not in string.punctuation) for s in text_splited]
-    text_splited = [s for s in text_splited if s]
-    pos_list = nltk.pos_tag(text_splited)
-    verbs_count = len([w for w in pos_list if w[1] in ('VB','VBD','VBG','VBN','VBP','VBZ')])
-    return verbs_count
-
-def part_of_speech_analysis(df):
-    """
-    詞性分析
-    """
-    df['noun_num'] = df.apply(lambda row: noun_num(row), axis =1)
-    df['adj_num'] = df.apply(lambda row: adj_num(row), axis =1)
-    df['verbs_num'] = df.apply(lambda row: verbs_num(row), axis =1)
-
-    positive_text = df[df['label']==0]
-    negative_text = df[df['label']==1]
-
-    positive_df = pd.DataFrame({
-        "part_of_speech": ["noun", "adj", "verbs"],
-        "num": [positive_text['noun_num'].sum(), positive_text['adj_num'].sum(), positive_text['verbs_num'].sum()]
-    })
-    
-    sns.barplot(x='part_of_speech', y='num', data=positive_df, palette=cmap)
-    plt.margins(0.02)
- 
-    plt.title('Part of speech analysis - Positive')
-    plt.ylim([0, 4000])
-    plt.yticks(np.arange(0, 4000, 500))
-    plt.xlabel("part of speech")
-    plt.ylabel("number")
-    plt.savefig(config.PLOT_PATH + "part_of_speech_analysis_positive.png")
-    plt.cla()
-    plt.clf()
-
-    negative_df = pd.DataFrame({
-        "part_of_speech": ["noun", "adj", "verbs"],
-        "num": [negative_text['noun_num'].sum(), negative_text['adj_num'].sum(), negative_text['verbs_num'].sum()]
-    })
-    
-    sns.barplot(x='part_of_speech', y='num', data=negative_df, palette=cmap)
-    plt.margins(0.02)
- 
-    plt.title('Part of speech analysis - Negative')
-    plt.ylim([0, 4000])
-    plt.yticks(np.arange(0, 4000, 500))
-    plt.xlabel("part of speech")
-    plt.ylabel("number")
-    plt.savefig(config.PLOT_PATH + "part_of_speech_analysis_negative.png")
-    plt.cla()
-    plt.clf()
+#########################################################################################
 
 def data_analysis(df):
     """
     資料分析
-    TODO:
-    用 GloVe 轉成 vector 做 dimensionality reduction 再可視化看 distribution
     """
     volume_analysis(df)
 
@@ -757,19 +468,51 @@ def data_analysis(df):
     # 計算不同詞性的數量
     part_of_speech_analysis(df)
 
-    with pd.option_context('display.max_rows', None, 'display.max_columns', None):  # more options can be specified also
-        print(df.head(1))
+    # 使用 text_remove_new_stopwords column 做 word to vector
+
+    # 方法一 GloVe pre-train model
+    # 先用 glove model 生成對應每個 word 的 vector dict
+    word_vec_mapping = generate_glove_word_vec_mapping_dict()
+    df['w2v_glove'] = df.text_remove_new_stopwords.apply(lambda x : w2v_glove(x, word_vec_mapping))
+    pca_2d_w2v_glove_result, pca_3d_w2v_glove_result, tsne_2d_w2v_glove_result, tsne_3d_w2v_glove_result = w2v_dim_reduction(df['w2v_glove'])
+    df['pca_2d_w2v_glove'] = pca_2d_w2v_glove_result.tolist()
+    df['pca_3d_w2v_glove'] = pca_3d_w2v_glove_result.tolist()
+    df['tsne_2d_w2v_glove'] = tsne_2d_w2v_glove_result.tolist()
+    df['tsne_3d_w2v_glove'] = tsne_3d_w2v_glove_result.tolist()
+    visualize_vectors(df[['label', 'pca_2d_w2v_glove']], "2d", "pca", "glove")
+    visualize_vectors(df[['label', 'pca_3d_w2v_glove']], "3d", "pca", "glove")
+    visualize_vectors(df[['label', 'tsne_2d_w2v_glove']], "2d", "tsne", "glove")
+    visualize_vectors(df[['label', 'tsne_3d_w2v_glove']], "3d", "tsne", "glove")
+    
+    # 方法二 TF-IDF
+    v = TfidfVectorizer()
+    tfidf_result = v.fit_transform(df['text_remove_new_stopwords'])
+    # print(type(tfidf_result))
+    df['w2v_tfidf'] = tfidf_result.toarray().tolist()
+    pca_2d_w2v_tfidf_result, pca_3d_w2v_tfidf_result, tsne_2d_w2v_tfidf_result, tsne_3d_w2v_tfidf_result = w2v_dim_reduction(df['w2v_tfidf'])
+    df['pca_2d_w2v_tfidf'] = pca_2d_w2v_tfidf_result.tolist()
+    df['pca_3d_w2v_tfidf'] = pca_3d_w2v_tfidf_result.tolist()
+    df['tsne_2d_w2v_tfidf'] = tsne_2d_w2v_tfidf_result.tolist()
+    df['tsne_3d_w2v_tfidf'] = tsne_3d_w2v_tfidf_result.tolist()
+    visualize_vectors(df[['label', 'pca_2d_w2v_tfidf']], "2d", "pca", "tfidf")
+    visualize_vectors(df[['label', 'pca_3d_w2v_tfidf']], "3d", "pca", "tfidf")
+    visualize_vectors(df[['label', 'tsne_2d_w2v_tfidf']], "2d", "tsne", "tfidf")
+    visualize_vectors(df[['label', 'tsne_3d_w2v_tfidf']], "3d", "tsne", "tfidf")
+
+    return df
 
 def main():
     """
     英文 NLP - Sentiment analysis
-    # TFIDF 與其他解法可參考：https://www.kaggle.com/abhishek/approaching-almost-any-nlp-problem-on-kaggle
     """
     df = load_data(config.INPUT_PATH)
 
-    data_analysis(df)
-
     # df = load_data(config.INPUT_PATH, 100) # 若想切出幾筆資料直接在第二個參數傳想切割的數量就好
+
+    processed_df = data_analysis(df)
+
+    with pd.option_context('display.max_rows', None, 'display.max_columns', None):  # more options can be specified also
+        print(processed_df.head(1))
 
     # X_train, X_test, y_train, y_test = train_test_split(df['text'], df['label'], test_size=config.TEST_SIZE, random_state=123)
     # print(X_train.shape, y_train.shape, X_test.shape, y_test.shape)
