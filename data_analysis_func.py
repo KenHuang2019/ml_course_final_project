@@ -234,8 +234,10 @@ def generate_word_cloud(df):
     """
     生成正負面的文字雲
     """
-    positive_text = df[df.label==1]['text_remove_new_stopwords'].values
-    negative_text = df[df.label==0]['text_remove_new_stopwords'].values
+    original_positive_text = df[df.label==1]['text'].values
+    original_negative_text = df[df.label==0]['text'].values
+    processed_positive_text = df[df.label==1]['text_remove_new_stopwords'].values
+    processed_negative_text = df[df.label==0]['text_remove_new_stopwords'].values
 
     wc = WordCloud(
         background_color="black", 
@@ -244,9 +246,9 @@ def generate_word_cloud(df):
         max_font_size=60,
         width=800,
         height=400
-    ).generate(" ".join(positive_text))
+    ).generate(" ".join(original_positive_text))
 
-    wc.to_file(config.PLOT_PATH + "analysis/" + 'positive_word_cloud.png')
+    wc.to_file(config.PLOT_PATH + "analysis/" + 'original_positive_word_cloud.png')
 
     wc = WordCloud(
         background_color="black", 
@@ -255,9 +257,31 @@ def generate_word_cloud(df):
         max_font_size=60,
         width=800,
         height=400
-    ).generate(" ".join(negative_text))
+    ).generate(" ".join(original_negative_text))
     wc.recolor(color_func=grey_color_func, random_state=3)
-    wc.to_file(config.PLOT_PATH + "analysis/" + 'negative_word_cloud.png')
+    wc.to_file(config.PLOT_PATH + "analysis/" + 'original_negative_word_cloud.png')
+
+    wc = WordCloud(
+        background_color="black", 
+        max_words=10000,
+        stopwords=STOPWORDS, 
+        max_font_size=60,
+        width=800,
+        height=400
+    ).generate(" ".join(processed_positive_text))
+
+    wc.to_file(config.PLOT_PATH + "analysis/" + 'processed_positive_word_cloud.png')
+
+    wc = WordCloud(
+        background_color="black", 
+        max_words=10000,
+        stopwords=STOPWORDS, 
+        max_font_size=60,
+        width=800,
+        height=400
+    ).generate(" ".join(processed_negative_text))
+    wc.recolor(color_func=grey_color_func, random_state=3)
+    wc.to_file(config.PLOT_PATH + "analysis/" + 'processed_negative_word_cloud.png')
 
 def noun_num(row):
     """function to give us fraction of noun over total words """
@@ -308,12 +332,13 @@ def part_of_speech_analysis(df):
     sns.barplot(x='part_of_speech', y='num', data=positive_df, palette=cmap)
     plt.margins(0.02)
  
-    plt.title('Part of speech analysis - Positive')
+    plt.title('Part of speech analysis - Positive', fontsize=16)
     plt.ylim([0, 4000])
-    plt.yticks(np.arange(0, 4000, 500))
-    plt.xlabel("part of speech")
-    plt.ylabel("number")
-    plt.savefig(config.PLOT_PATH + "analysis/" + "part_of_speech_analysis_positive.png")
+    plt.xticks(fontsize=16)
+    plt.yticks(np.arange(0, 4000, 500), fontsize=12)
+    plt.xlabel("part of speech", fontsize=14)
+    plt.ylabel("number", fontsize=14)
+    plt.savefig(config.PLOT_PATH + "analysis/" + "part_of_speech_analysis_positive.png", bbox_inches='tight')
     plt.cla()
     plt.clf()
 
@@ -325,12 +350,13 @@ def part_of_speech_analysis(df):
     sns.barplot(x='part_of_speech', y='num', data=negative_df, palette=cmap)
     plt.margins(0.02)
  
-    plt.title('Part of speech analysis - Negative')
+    plt.title('Part of speech analysis - Negative', fontsize=16)
     plt.ylim([0, 4000])
-    plt.yticks(np.arange(0, 4000, 500))
-    plt.xlabel("part of speech")
-    plt.ylabel("number")
-    plt.savefig(config.PLOT_PATH + "analysis/" + "part_of_speech_analysis_negative.png")
+    plt.xticks(fontsize=16)
+    plt.yticks(np.arange(0, 4000, 500), fontsize=12)
+    plt.xlabel("part of speech", fontsize=14)
+    plt.ylabel("number", fontsize=14)
+    plt.savefig(config.PLOT_PATH + "analysis/" + "part_of_speech_analysis_negative.png", bbox_inches='tight')
     plt.cla()
     plt.clf()
 

@@ -156,17 +156,25 @@ def preprocessing_split(df, target_column, vocab_size, max_length):
     text_added = pad_sequences(text,maxlen=max_length,padding ='post',truncating='post')
 
     # 切分訓練集與測試集
-    training_size=int(len(text)*0.8)
+    training_val_size=int(len(text)*0.8)
 
-    train_seq=text_added[:training_size]
-    test_seq=text_added[training_size:]
+    train_val_seq=text_added[:training_val_size]
+    test_seq=text_added[training_val_size:]
 
-    train_labels=np.array(label[:training_size])
-    test_labels=np.array(label[training_size:])
-    print("Total no of Training Sequence are",len(train_seq))
+    train_val_labels=np.array(label[:training_val_size])
+    test_labels=np.array(label[training_val_size:])
+    print("Total no of Training Sequence are",len(train_val_seq))
     print("Total no of Test Sequence are",len(test_seq))
 
-    return train_seq, train_labels, test_seq, test_labels
+    train_size=int(len(train_val_seq)*0.8)
+
+    train_seq = train_val_seq[:train_size]
+    val_seq = train_val_seq[train_size:]
+
+    train_labels = train_val_labels[:train_size]
+    val_labels = train_val_labels[train_size:]
+
+    return train_seq, train_labels, val_seq, val_labels, test_seq, test_labels
 
 def tokenize(Doc):
     stops = set(stopwords.words('english'))
@@ -208,21 +216,8 @@ def preprocessing_glove(df, vocab_size, max_length):
             token = tokens[0]  # 第一個token就是詞彙
             vec = tokens[1:]  # 後面的token向量
             word_vec_mapping[token] = np.array(vec, dtype=np.float32) # 把整個model做成一個字典，以利查找字對應的向量
-
-    # vec_dimensions = len(word_vec_mapping.get('men'))
-    # print("vec_dimensions:", vec_dimensions)
-    # print("word_vec_mapping length:", len(list(word_vec_mapping.items())))
-    # print(doc2vec(text[2], word_vec_mapping))
-    # print(len(text))
     
     text_vecs = np.array([doc2vec(t, word_vec_mapping) for t in text])
-    print(text_vecs[1])
-
-    # norm = np.linalg.norm(text_vecs)
-    # text_vecs = text_vecs/norm
-
-    # print(text_vecs.shape)
-    # print(text_vecs[1])
 
     data_scaler_minmax = preprocessing.MinMaxScaler(feature_range=(0, 100))
     text_vecs = data_scaler_minmax.fit_transform(text_vecs).astype(int)
@@ -261,13 +256,14 @@ def preprocessing_no_split(df, vocab_size, max_length):
 
     return X, Y
 
-def method_2_LSTM(df):
+def method_2_LSTM(df, target_column):
     """
     做 word to vector 之後使用 LSTM
     """
+    df = df.dropna()
     vocab_size = 1000
     max_length = 50
-    train_seq, train_labels, test_seq, test_labels = preprocessing_split(df, vocab_size, max_length)
+    train_seq, train_labels, val_seq, val_labels, test_seq, test_labels = preprocessing_split(df, target_column, vocab_size, max_length)
 
     # Create model
     embedding_dim = 16
@@ -290,7 +286,7 @@ def method_2_LSTM(df):
     model.compile(loss="binary_crossentropy",optimizer='adam',metrics=['accuracy'])
     model.summary()
 
-    history = model.fit(train_seq,train_labels,epochs=40,validation_data=(test_seq,test_labels),callbacks=my_callbacks)
+    history = model.fit(train_seq,train_labels,epochs=40,validation_data=(val_seq,val_labels),callbacks=my_callbacks)
 
     plot_graphs(history, "accuracy", 'LSTM')
     plot_graphs(history, "loss", 'LSTM')
@@ -305,7 +301,8 @@ def method_3_Attention(df, target_column):
         unique_words = set()
         df[target_column].str.lower().str.split().apply(unique_words.update)
 
-        vocab_size = len(unique_words)
+        # vocab_size = len(unique_words)
+        vocab_size = 1100
         max_length = len(max(df[target_column], key=len).lower().split())
 
         x_train_val, y_train_val, x_test, y_test = preprocessing_split(df, target_column, vocab_size, max_length)
@@ -319,15 +316,14 @@ def method_3_Attention(df, target_column):
         y_val = y_train_val[training_size:]
 
     else: # 已經做完 word to vector
-        vectors = df[target_column].apply(lambda x: 
-                           np.fromstring(
-                               x.replace('\n','')
-                                .replace('[','')
-                                .replace(']','')
-                                .replace('  ',' '), sep=' ')).astype('float32')
-
-        label = np.array(df['label'].tolist()).astype('float32')
+        if target_column == 'w2v_glove':
+            vectors = np.array([np.fromstring(s.replace('\n','').replace('\t','').replace('[','').replace('  ','').replace(']',''), sep=' ') for s in df[target_column].values])
+        else:
+            vectors = np.array([np.fromstring(s.replace('[','').replace(']',''), sep=', ') for s in df[target_column].values])
         
+        print(vectors.shape[1])
+        label = df['label'].to_numpy()
+
         # 把訓練集切分出一些作為測試集
         training_val_size = int(len(df)*0.8)
 
@@ -343,13 +339,37 @@ def method_3_Attention(df, target_column):
         y_train = y_train_val[:training_val_size]
         y_val = y_train_val[training_val_size:]
 
-        vocab_size = 100
-        max_length = 100
+        vocab_size = vectors.shape[1]
+        max_length = vectors.shape[1]
+        # exit()
     
     # print("train[0]", x_train[0])
 
-    embed_dim = 12  # Embedding size for each token
-    num_heads = 6  # Number of attention heads
+    # embed_dim = 12  # Embedding size for each token
+    # num_heads = 6  # Number of attention heads
+    # ff_dim = 8  # Hidden layer size in feed forward network inside transformer
+
+    # inputs = layers.Input(shape=(max_length,))
+    # embedding_layer = TokenAndPositionEmbedding(max_length, vocab_size, embed_dim)
+    # x = embedding_layer(inputs)
+    # transformer_block = TransformerBlock(embed_dim, num_heads, ff_dim)
+    # x = transformer_block(x)
+    # x = layers.GlobalAveragePooling1D()(x)
+    # x = layers.Dropout(0.95)(x)
+    # x = layers.BatchNormalization()(x)
+    # # x = layers.Dense(8)(x)
+    # # x = layers.LeakyReLU()(x)
+    # # x = layers.Dropout(0.6)(x)
+    # # x = layers.BatchNormalization()(x)
+    # # x = layers.Dense(4)(x)
+    # # x = layers.LeakyReLU()(x)
+    # # x = layers.Dropout(0.6)(x)
+    # # x = layers.BatchNormalization()(x)
+    # outputs = layers.Dense(2, activation="softmax")(x)
+
+    # model = keras.Model(inputs=inputs, outputs=outputs)
+    embed_dim = 16  # Embedding size for each token
+    num_heads = 2  # Number of attention heads
     ff_dim = 8  # Hidden layer size in feed forward network inside transformer
 
     inputs = layers.Input(shape=(max_length,))
@@ -358,37 +378,16 @@ def method_3_Attention(df, target_column):
     transformer_block = TransformerBlock(embed_dim, num_heads, ff_dim)
     x = transformer_block(x)
     x = layers.GlobalAveragePooling1D()(x)
-    x = layers.Dropout(0.95)(x)
+    x = layers.Dropout(0.6)(x)
     x = layers.BatchNormalization()(x)
-    # x = layers.Dense(8)(x)
-    # x = layers.LeakyReLU()(x)
-    # x = layers.Dropout(0.6)(x)
-    # x = layers.BatchNormalization()(x)
-    # x = layers.Dense(4)(x)
-    # x = layers.LeakyReLU()(x)
-    # x = layers.Dropout(0.6)(x)
-    # x = layers.BatchNormalization()(x)
+    x = layers.Dense(4)(x)
+    x = layers.LeakyReLU()(x)
+    x = layers.Dropout(0.5)(x)
+    x = layers.BatchNormalization()(x)
     outputs = layers.Dense(2, activation="softmax")(x)
 
     model = keras.Model(inputs=inputs, outputs=outputs)
 
-    print(model.summary())
-
-    # lr_schedule = keras.optimizers.schedules.ExponentialDecay(
-    #     initial_learning_rate=1e-1,
-    #     decay_steps=5,
-    #     decay_rate=0.9
-    # )
-    # opt_sgd = keras.optimizers.SGD(learning_rate=lr_schedule, momentum=0.5)
-
-    # opt_adagrad = tf.keras.optimizers.Adagrad(
-    #     learning_rate=0.0001,
-    #     initial_accumulator_value=0.1,
-    #     epsilon=1e-07,
-    #     name="Adagrad",
-    # )
-
-    # opt = keras.optimizers.Adam(learning_rate=0.001)
     opt_adam = tf.keras.optimizers.Adam(
         learning_rate=3e-4, # 3e-4
         beta_1=0.85,
@@ -398,25 +397,16 @@ def method_3_Attention(df, target_column):
         name="Adam"
     )
 
-    # opt_adadelta = tf.keras.optimizers.Adadelta(
-    #     learning_rate=0.1, rho=0.9, epsilon=1e-07, name="Adadelta"
-    # )
-
     # loss: categorical_crossentropy, sparse_categorical_crossentropy
     model.compile(optimizer=opt_adam, loss="sparse_categorical_crossentropy", metrics=["accuracy"])
     
     # model.compile(optimizer=opt_adam, loss="binary_crossentropy", metrics=["accuracy"])
     
     history = model.fit(
-        x_train, y_train, batch_size=256, epochs=200, validation_data=(x_val, y_val)#,callbacks=my_callbacks
+        x_train, y_train, batch_size=32, epochs=50, validation_data=(x_val, y_val)#,callbacks=my_callbacks
     )
 
     # model.save('./model.h5')
-
-    # 自動切割 validation set
-    # history = model.fit(
-    #     X, Y, batch_size=32, epochs=60, validation_split=0.2
-    # )
 
     plot_graphs(history, "accuracy", 'Attention')
     plot_graphs(history, "loss", 'Attention')
@@ -550,6 +540,18 @@ def data_analysis(df):
 
     return df
 
+def random_select_rows(df):
+    """
+    隨機選取 500, 1000, ... 2500 筆資料，測試不同資料量在相同演算法的差異
+    """
+    df_500 = df.sample(n=500,replace=False)
+    df_1000 = df.sample(n=1000,replace=False)
+    df_1500 = df.sample(n=1500,replace=False)
+    df_2000 = df.sample(n=2000,replace=False)
+    df_2500 = df.sample(n=2500,replace=False)
+
+    return df_500, df_1000, df_1500, df_2000, df_2500, df
+
 def main():
     """
     英文 NLP - Sentiment analysis
@@ -567,7 +569,15 @@ def main():
     else:
         print("read processed data CSV")
         processed_df = pd.read_csv("./processed_data.csv")
+
+    df_500, df_1000, df_1500, df_2000, df_2500, df_3000 = random_select_rows(processed_df)
     
+    print(len(df_500.index))
+    print(len(df_1000.index))
+    print(len(df_1500.index))
+    print(len(df_2000.index))
+    print(len(df_2500.index))
+    print(len(df_3000.index))
     # with pd.option_context('display.max_rows', None, 'display.max_columns', None):  # more options can be specified also
     #     print(processed_df.head(1))
 
@@ -576,13 +586,13 @@ def main():
 
     # method_1_ann(X_train, X_test, y_train, y_test)
 
-    # method_2_LSTM(df.reset_index(drop=True))
+    # method_2_LSTM(processed_df.reset_index(drop=True), "text_remove_puncs_remove_stopwords")
     
     # method_3_Attention(processed_df.reset_index(drop=True), "text")
     # method_3_Attention(processed_df.reset_index(drop=True), "text_remove_puncs")
-    method_3_Attention(processed_df.reset_index(drop=True), "text_remove_puncs_remove_stopwords")
+    # method_3_Attention(processed_df.reset_index(drop=True), "text_remove_puncs_remove_stopwords")
     # method_3_Attention(processed_df.reset_index(drop=True), "text_remove_new_stopwords")
-    # method_3_Attention(processed_df.reset_index(drop=True), "w2v_glove")
+    # method_3_Attention(processed_df.reset_index(drop=True), "w2v_glove") # 從string轉不回np arr
     # method_3_Attention(processed_df.reset_index(drop=True), "w2v_tfidf")
 
     # method_4_decisiontree(df.reset_index(drop=True))
