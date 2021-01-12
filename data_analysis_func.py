@@ -93,10 +93,10 @@ def length_cdf_analysis(df, sent_length, sent_freq):
     plt.plot(sent_length, sent_pentage_list)
 
     # 尋找分位點為 quantile 的句子長度
-    quantile = 0.950
+    quantile = 0.95
     #print(list(sent_pentage_list))
     for length, per in zip(sent_length, sent_pentage_list):
-        if round(per, 3) == quantile:
+        if round(per, 2) == quantile:
             index = length
             break
     print("\n分位點為%s的句子長度:%d." % (quantile, index))
@@ -137,7 +137,7 @@ def puncs_stopword_removal_length_analysis(df):
     sns.barplot(x='sentence_length', y='sentence_frequency', data=tmp_df, palette=cmap)
     plt.margins(0.02)
     # plt.bar(sent_length, sent_freq)
-    plt.title("Sentnece length and frequency") # , fontproperties=my_font
+    plt.title("Sentnece length and frequency (Remove stopwords and puncs)") # , fontproperties=my_font
     plt.xlabel("length") # , fontproperties=my_font
     plt.ylabel("frequency") # , fontproperties=my_font
     # plt.xlim([0, 350])
@@ -224,7 +224,7 @@ def generate_new_stop_words(top_n_common_words):
     把太常出現且與情緒無關的字詞找出來作為新的停用詞
     """
     common_words_value = top_n_common_words['index'].values
-    remove_words = ['amazing', 'delicious', 'good', 'great', 'like', 'bad', 'best', 'well', 'love', 'nice', 'pretty', 'friendly', 'better', 'disappointed']
+    remove_words = ['dont', 'amazing', 'delicious', 'good', 'great', 'like', 'bad', 'best', 'well', 'love', 'nice', 'pretty', 'friendly', 'better', 'disappointed', 'didnt', 'wont']
     return [x for x in common_words_value if x not in remove_words]
 
 def grey_color_func(word, font_size, position, orientation, random_state=None, **kwargs):
@@ -236,8 +236,8 @@ def generate_word_cloud(df):
     """
     original_positive_text = df[df.label==1]['text'].values
     original_negative_text = df[df.label==0]['text'].values
-    processed_positive_text = df[df.label==1]['text_remove_new_stopwords'].values
-    processed_negative_text = df[df.label==0]['text_remove_new_stopwords'].values
+    processed_positive_text = df[df.label==1]['text_remove_puncs_remove_stopwords'].values
+    processed_negative_text = df[df.label==0]['text_remove_puncs_remove_stopwords'].values
 
     wc = WordCloud(
         background_color="black", 

@@ -11,3 +11,7 @@ glove_model/
 ./model.h5
 
 word_cloud_template/
+
+./processed_data.csv
+
+./lstm_model

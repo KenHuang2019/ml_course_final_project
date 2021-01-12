@@ -44,12 +44,20 @@ import tensorflow_datasets as tfds
 from tensorflow import keras
 from tensorflow.keras import layers
 from tensorflow.keras.preprocessing.sequence import pad_sequences
+from tensorflow.keras.preprocessing.text import Tokenizer
+
+# from tensorflow.keras.models import Sequential
+# from tensorflow.keras.layers import Dense
+from tensorflow.keras import backend as K
 
 import keras
 from keras import regularizers
 from keras.models import Sequential
 from keras.layers import Dense, Activation
 from keras.callbacks import EarlyStopping, ModelCheckpoint
+from keras.utils.np_utils import to_categorical
+
+import joblib
 
 # Attention
 from multi_head_self_attention import MultiHeadSelfAttention, TransformerBlock, TokenAndPositionEmbedding
@@ -57,10 +65,8 @@ from multi_head_self_attention import MultiHeadSelfAttention, TransformerBlock, 
 # data analysis
 from data_analysis_func import *
 
+#### 以下為 preprocessing 函式 ################################################################################
 eng_stopwords = nltk.corpus.stopwords.words("english")
-sns.set_style("darkgrid", {"axes.facecolor": ".7"})
-sns.set_context(rc = {'patch.linewidth': 0.1})
-cmap = sns.light_palette("#434343") # light:b #69d ch:start=.2,rot=-.3, ch:s=.25,rot=-.25 , dark:salmon_r
 
 def load_data(p, sub_set_num=None):
     """
@@ -70,9 +76,17 @@ def load_data(p, sub_set_num=None):
 
     df_yelp = pd.read_table( p + file_names[0] ,header=None,sep='\t', names=["text", "label"], quoting=3)
     df_imdb = pd.read_table( p + file_names[1] ,header=None,sep='\t', names=["text", "label"], quoting=3)
-    df_amazon = pd.read_table( p + file_names[0] ,header=None,sep='\t', names=["text", "label"], quoting=3)
-    df = pd.concat([df_amazon,df_yelp,df_imdb])
+    df_amazon = pd.read_table( p + file_names[2] ,header=None,sep='\t', names=["text", "label"], quoting=3)
 
+    df = pd.DataFrame(columns = ['text' , 'label'])
+    index = 0
+
+    for n in range(1000):
+        df.loc[index] = df_amazon.iloc[n]
+        df.loc[index+1] = df_yelp.iloc[n]
+        df.loc[index+2] = df_imdb.iloc[n]
+        index += 3
+    
     if sub_set_num == None:
         return df
     else:
@@ -85,58 +99,37 @@ def add_feature(X, feature_to_add):
     '''
     return hstack([X, csr_matrix(feature_to_add).T], 'csr')
 
-def plot_graphs(history, string, method):
-    plt.plot(history.history[string])
-    plt.plot(history.history['val_'+string])
-    plt.xlabel("Epochs")
-    plt.ylabel(string)
-    plt.legend([string, 'val_'+string])
-    # plt.show()
-    plt.savefig('./plot/training/' + method + '_' + string + '.png')
-    plt.clf()
+def tokenize_split(df, target_column, vocab_size, max_length):
+    t = df[target_column].values
 
-#########################################################################################
+    label = df['label'].values
 
-def method_1_ann(X_train, X_test, y_train, y_test):
-    """
-    嘗試使用ANN做情感預測
-    """
-    vect = CountVectorizer(lowercase=False, token_pattern=r'(?u)\b\w+\b|\,|\.|\;|\:')
+    tokenizer = Tokenizer(num_words=vocab_size)
+    tokenizer.fit_on_texts(t)
+    vocab_size = len(tokenizer.word_index) + 1
+    encoded_docs = tokenizer.texts_to_sequences(t)
+    padded_sequence = pad_sequences(encoded_docs, maxlen=max_length)
+    # 切分訓練集與測試集
+    training_val_size=int(padded_sequence.shape[0]*0.8)
 
-    X_train_dtm = vect.fit_transform(X_train)
-    X_test_dtm = vect.transform(X_test)
+    train_val_seq = padded_sequence[:training_val_size]
+    test_seq = padded_sequence[training_val_size:]
 
-    X_train_chars = X_train.str.len()
-    X_test_chars = X_test.str.len()
+    train_val_labels = label[:training_val_size]
+    test_labels = label[training_val_size:]
 
-    X_train_punc = X_train.apply(lambda x: len([c for c in str(x) if c in punctuation]))
-    X_test_punc = X_test.apply(lambda x: len([c for c in str(x) if c in punctuation]))
+    print("Total no of Training Sequence are",len(train_val_seq))
+    print("Total no of Test Sequence are",len(test_seq))
 
-    X_train_dtm = add_feature(X_train_dtm, [X_train_chars, X_train_punc])
-    X_test_dtm = add_feature(X_test_dtm, [X_test_chars, X_test_punc])
+    train_size=int(len(train_val_seq)*0.8)
 
-    X_train_dense = X_train_dtm.todense()
-    print(X_train_dense.shape)
+    train_seq = train_val_seq[:train_size]
+    val_seq = train_val_seq[train_size:]
 
+    train_labels = train_val_labels[:train_size]
+    val_labels = train_val_labels[train_size:]
 
-    model=Sequential()
-    model.add(Dense(1024,activation='relu',kernel_regularizer=regularizers.l2(0.1)))  
-    model.add(Dense(256,activation='relu',kernel_regularizer=regularizers.l2(0.1)))
-    model.add(Dense(1))
-
-    model.compile(optimizer='adam',loss="mse")
-    earlystopper = EarlyStopping(monitor='val_loss', patience=6, verbose=0)
-    checkpoint =ModelCheckpoint(str(datetime.now().strftime("%d-%m-%Y_%H-%M-%S"))+".hdf5",save_best_only=True)
-    callback_list=[earlystopper,checkpoint]
-    model.fit(X_train_dense, y_train.values, epochs=40, batch_size=config.BATCH_SIZE,validation_split=config.VALIDATION_SIZE,callbacks=callback_list)
-
-    pred_train = model.predict(X_train_dense,batch_size=config.BATCH_SIZE)
-    pred_test = model.predict(X_test_dtm,batch_size=config.BATCH_SIZE)
-
-    pred_test_round = np.around(pred_test)
-    pred_test_int = pred_test_round.astype(int)
-    correct_prediction = np.equal(pred_test_int, y_test.values)
-    print(np.mean(correct_prediction))
+    return train_seq, train_labels, val_seq, val_labels, test_seq, test_labels
 
 def preprocessing_split(df, target_column, vocab_size, max_length):
     """
@@ -256,93 +249,182 @@ def preprocessing_no_split(df, vocab_size, max_length):
 
     return X, Y
 
-def method_2_LSTM(df, target_column):
+def select_rows(df):
+    """
+    選取 500, 1000, ... 2500 筆資料，測試不同資料量在相同演算法的差異
+    """
+    return df[:500], df[:1000], df[:1500], df[:2000], df[:2500], df
+#### 以上為 preprocessing 函式 ################################################################################
+# ----------------------------------------------------------------------------------------------------------#
+#### 以下為 plot 相關設定與函式 ################################################################################
+sns.set_style("darkgrid", {"axes.facecolor": ".7"})
+sns.set_context(rc = {'patch.linewidth': 0.1})
+cmap = sns.light_palette("#434343") # light:b #69d ch:start=.2,rot=-.3, ch:s=.25,rot=-.25 , dark:salmon_r
+
+def plot_graphs(history, string, method, rows_num, target_column):
+    plt.plot(history.history[string], color='white')
+    plt.plot(history.history['val_'+string], color='black')
+    plt.xlabel("Epochs")
+    plt.ylabel(string)
+    plt.legend([string, 'val_'+string])
+    plt.savefig('./plot/training/' + method.lower() + '/' + rows_num + '_' +  string + '.png')
+    plt.clf()
+#### 以上為 plot 相關設定與函式 #################################################################################
+# ----------------------------------------------------------------------------------------------------------#
+#### 以下為 method 函式 #######################################################################################
+
+def method_1_ann(X_train, X_test, y_train, y_test):
+    """
+    嘗試使用ANN做情感預測
+    """
+    vect = CountVectorizer(lowercase=False, token_pattern=r'(?u)\b\w+\b|\,|\.|\;|\:')
+
+    X_train_dtm = vect.fit_transform(X_train)
+    X_test_dtm = vect.transform(X_test)
+
+    X_train_chars = X_train.str.len()
+    X_test_chars = X_test.str.len()
+
+    X_train_punc = X_train.apply(lambda x: len([c for c in str(x) if c in punctuation]))
+    X_test_punc = X_test.apply(lambda x: len([c for c in str(x) if c in punctuation]))
+
+    X_train_dtm = add_feature(X_train_dtm, [X_train_chars, X_train_punc])
+    X_test_dtm = add_feature(X_test_dtm, [X_test_chars, X_test_punc])
+
+    X_train_dense = X_train_dtm.todense()
+    print(X_train_dense.shape)
+
+
+    model=Sequential()
+    model.add(Dense(1024,activation='relu',kernel_regularizer=regularizers.l2(0.1)))  
+    model.add(Dense(256,activation='relu',kernel_regularizer=regularizers.l2(0.1)))
+    model.add(Dense(1))
+
+    model.compile(optimizer='adam',loss="mse")
+    earlystopper = EarlyStopping(monitor='val_loss', patience=6, verbose=0)
+    checkpoint =ModelCheckpoint(str(datetime.now().strftime("%d-%m-%Y_%H-%M-%S"))+".hdf5",save_best_only=True)
+    callback_list=[earlystopper,checkpoint]
+    model.fit(X_train_dense, y_train.values, epochs=config.EPOCHS, batch_size=config.BATCH_SIZE,validation_split=config.VALIDATION_SIZE,callbacks=callback_list)
+
+    pred_train = model.predict(X_train_dense,batch_size=config.BATCH_SIZE)
+    pred_test = model.predict(X_test_dtm,batch_size=config.BATCH_SIZE)
+
+    pred_test_round = np.around(pred_test)
+    pred_test_int = pred_test_round.astype(int)
+    correct_prediction = np.equal(pred_test_int, y_test.values)
+    print(np.mean(correct_prediction))
+
+def method_2_LSTM(df, target_column, max_length, vocab_size):
     """
     做 word to vector 之後使用 LSTM
     """
+    rows_num = str(len(df.index))
     df = df.dropna()
-    vocab_size = 1000
-    max_length = 50
-    train_seq, train_labels, val_seq, val_labels, test_seq, test_labels = preprocessing_split(df, target_column, vocab_size, max_length)
+
+    # train_x, train_y, val_x, val_y, test_x, test_y = preprocessing_split(df, target_column, vocab_size, max_length)
+    train_x, train_y, val_x, val_y, test_x, test_y = tokenize_split(df, target_column, vocab_size, max_length)
 
     # Create model
-    embedding_dim = 16
+    embedding_dim = max_length
 
-    model=tf.keras.Sequential([
+    model = tf.keras.Sequential([
         tf.keras.layers.Embedding(vocab_size,embedding_dim,input_length=max_length),
         tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(embedding_dim,return_sequences=True)),
-        tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(embedding_dim)),
-        tf.keras.layers.Dense(6,activation='relu'),
+        # tf.keras.layers.Dropout(0.2),
+        # tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(embedding_dim)),
+        # tf.keras.layers.BatchNormalization(),
+        tf.keras.layers.Dropout(0.2),
+        tf.keras.layers.Dense(10,activation='relu'),
+        # tf.keras.layers.BatchNormalization(),
         tf.keras.layers.Dropout(0.2),
         tf.keras.layers.Dense(1,activation='sigmoid')
     ])
 
     my_callbacks = [
-    tf.keras.callbacks.EarlyStopping(patience=6),
-    tf.keras.callbacks.ModelCheckpoint(filepath='model.{epoch:02d}-{val_loss:.2f}.h5',monitor='val_loss',mode='auto',save_best_only=True),
+        tf.keras.callbacks.EarlyStopping(patience=8),
+        tf.keras.callbacks.ModelCheckpoint(
+            filepath='./lstm_model/'  + rows_num + '_epoch-{epoch:02d}-val_accuracy-{val_accuracy:.2f}.h5',
+            monitor='val_accuracy',
+            mode='auto',
+            save_best_only=True
+            ),
     ]
 
-    #fit a model
+    # opt_adam = tf.keras.optimizers.Adam(
+    #     learning_rate=3e-4, # 3e-4
+    #     beta_1=0.85,
+    #     beta_2=0.99,
+    #     epsilon=1e-07,
+    #     amsgrad=True,
+    #     name="Adam"
+    # )
+
     model.compile(loss="binary_crossentropy",optimizer='adam',metrics=['accuracy'])
-    model.summary()
+    # model.summary()
 
-    history = model.fit(train_seq,train_labels,epochs=40,validation_data=(val_seq,val_labels),callbacks=my_callbacks)
+    history = model.fit(
+        train_x,
+        train_y,
+        epochs=config.EPOCHS,
+        validation_data=(val_x, val_y),
+        callbacks=my_callbacks
+    )
 
-    plot_graphs(history, "accuracy", 'LSTM')
-    plot_graphs(history, "loss", 'LSTM')
+    print("Evaluate on test data")
+    test_results = model.evaluate(test_x, test_y, batch_size=32)
+    print("test loss, test acc:", test_results)
+    with open('./plot/training/lstm/test_result/'+rows_num+'_test_result.txt', 'w') as f:
+        f.write("Test loss: {}\n".format(test_results[0]))
+        f.write("Test acc: {}\n".format(test_results[1]))
 
-def method_3_Attention(df, target_column):
+    joblib.dump(history.history, './plot/training/lstm/hist_joblib/'+rows_num+'_hist.joblib')
+    
+    plot_graphs(history, "accuracy", 'LSTM', rows_num, target_column)
+    plot_graphs(history, "loss", 'LSTM', rows_num, target_column)
+
+class WarmUpLearningRateScheduler(keras.callbacks.Callback):
+    """Warmup learning rate scheduler
+    """
+
+    def __init__(self, warmup_batches, init_lr, verbose=0):
+        """Constructor for warmup learning rate scheduler
+
+        Arguments:
+            warmup_batches {int} -- Number of batch for warmup.
+            init_lr {float} -- Learning rate after warmup.
+
+        Keyword Arguments:
+            verbose {int} -- 0: quiet, 1: update messages. (default: {0})
+        """
+
+        super(WarmUpLearningRateScheduler, self).__init__()
+        self.warmup_batches = warmup_batches
+        self.init_lr = init_lr
+        self.verbose = verbose
+        self.batch_count = 0
+        self.learning_rates = []
+
+    def on_batch_end(self, batch, logs=None):
+        self.batch_count = self.batch_count + 1
+        lr = K.get_value(self.model.optimizer.lr)
+        self.learning_rates.append(lr)
+
+    def on_batch_begin(self, batch, logs=None):
+        if self.batch_count <= self.warmup_batches:
+            lr = self.batch_count*self.init_lr/self.warmup_batches
+            K.set_value(self.model.optimizer.lr, lr)
+            if self.verbose > 0:
+                print('\nBatch %05d: WarmUpLearningRateScheduler setting learning '
+                      'rate to %s.' % (self.batch_count + 1, lr))
+
+def method_3_Attention(df, target_column, max_length, vocab_size):
     """
     Attention
     """
+    rows_num = str(len(df.index))
     df = df.dropna()
-    TEXT_DATA_COL_NAME = ["text", "text_remove_puncs", "text_remove_puncs", "text_remove_puncs_remove_stopwords", "text_remove_new_stopwords"]
-    if target_column in TEXT_DATA_COL_NAME:
-        unique_words = set()
-        df[target_column].str.lower().str.split().apply(unique_words.update)
+    train_x, train_y, val_x, val_y, test_x, test_y = tokenize_split(df, target_column, vocab_size, max_length)
 
-        # vocab_size = len(unique_words)
-        vocab_size = 1100
-        max_length = len(max(df[target_column], key=len).lower().split())
-
-        x_train_val, y_train_val, x_test, y_test = preprocessing_split(df, target_column, vocab_size, max_length)
-
-        # 把訓練集切分出一些作為驗證集
-        training_size = int(len(x_train_val)*0.8)
-
-        x_train = x_train_val[:training_size]
-        x_val = x_train_val[training_size:]
-        y_train = y_train_val[:training_size]
-        y_val = y_train_val[training_size:]
-
-    else: # 已經做完 word to vector
-        if target_column == 'w2v_glove':
-            vectors = np.array([np.fromstring(s.replace('\n','').replace('\t','').replace('[','').replace('  ','').replace(']',''), sep=' ') for s in df[target_column].values])
-        else:
-            vectors = np.array([np.fromstring(s.replace('[','').replace(']',''), sep=', ') for s in df[target_column].values])
-        
-        print(vectors.shape[1])
-        label = df['label'].to_numpy()
-
-        # 把訓練集切分出一些作為測試集
-        training_val_size = int(len(df)*0.8)
-
-        x_train_val = vectors[:training_val_size]
-        x_test = vectors[training_val_size:]
-
-        x_train = x_train_val[:training_val_size]
-        x_val = x_train_val[training_val_size:]
-
-        y_train_val = label[:training_val_size]
-        y_test = label[training_val_size:]
-
-        y_train = y_train_val[:training_val_size]
-        y_val = y_train_val[training_val_size:]
-
-        vocab_size = vectors.shape[1]
-        max_length = vectors.shape[1]
-        # exit()
-    
     # print("train[0]", x_train[0])
 
     # embed_dim = 12  # Embedding size for each token
@@ -368,23 +450,32 @@ def method_3_Attention(df, target_column):
     # outputs = layers.Dense(2, activation="softmax")(x)
 
     # model = keras.Model(inputs=inputs, outputs=outputs)
-    embed_dim = 16  # Embedding size for each token
-    num_heads = 2  # Number of attention heads
-    ff_dim = 8  # Hidden layer size in feed forward network inside transformer
+    embed_dim = 128 # Embedding size for each token # 348
+    num_heads = 4 # Number of attention heads
+    ff_dim = 128 # Hidden layer size in feed forward network inside transformer
 
     inputs = layers.Input(shape=(max_length,))
     embedding_layer = TokenAndPositionEmbedding(max_length, vocab_size, embed_dim)
     x = embedding_layer(inputs)
+
     transformer_block = TransformerBlock(embed_dim, num_heads, ff_dim)
     x = transformer_block(x)
     x = layers.GlobalAveragePooling1D()(x)
-    x = layers.Dropout(0.6)(x)
-    x = layers.BatchNormalization()(x)
-    x = layers.Dense(4)(x)
+    x = layers.Dropout(0.4)(x)
+    # x = layers.BatchNormalization()(x)
+
+    # x = layers.Dense(32)(x)
+    # x = layers.LeakyReLU()(x)
+    # x = layers.Dropout(0.2)(x)
+    # x = layers.BatchNormalization()(x)
+
+    x = layers.Dense(16)(x)
     x = layers.LeakyReLU()(x)
-    x = layers.Dropout(0.5)(x)
-    x = layers.BatchNormalization()(x)
+    x = layers.Dropout(0.2)(x)
+    # x = layers.BatchNormalization()(x)
+
     outputs = layers.Dense(2, activation="softmax")(x)
+    # outputs = layers.Dense(1, activation="sigmoid")(x)
 
     model = keras.Model(inputs=inputs, outputs=outputs)
 
@@ -399,17 +490,48 @@ def method_3_Attention(df, target_column):
 
     # loss: categorical_crossentropy, sparse_categorical_crossentropy
     model.compile(optimizer=opt_adam, loss="sparse_categorical_crossentropy", metrics=["accuracy"])
-    
-    # model.compile(optimizer=opt_adam, loss="binary_crossentropy", metrics=["accuracy"])
-    
+
+    # model.compile(optimizer="adam", loss="binary_crossentropy", metrics=["accuracy"])
+
+    # Number of warmup epochs.
+    warmup_epoch = 5
+    sample_count = int(rows_num)
+    b_s = 32
+    # Compute the number of warmup batches.
+    warmup_batches = warmup_epoch * sample_count / b_s
+
+    my_callbacks = [
+        tf.keras.callbacks.EarlyStopping(patience=10),
+        tf.keras.callbacks.ModelCheckpoint(
+            filepath='./attention_model/'  + rows_num + '_epoch-{epoch:02d}-val_accuracy-{val_accuracy:.2f}.h5',
+            monitor='val_accuracy',
+            mode='auto',
+            save_best_only=True
+            ),
+        WarmUpLearningRateScheduler(warmup_batches, init_lr=0.001)
+    ]
+
     history = model.fit(
-        x_train, y_train, batch_size=32, epochs=50, validation_data=(x_val, y_val)#,callbacks=my_callbacks
+        train_x, train_y,
+        batch_size=32,
+        epochs=config.EPOCHS,
+        validation_data=(val_x, val_y),
+        callbacks=my_callbacks
     )
+
+    print("Evaluate on test data")
+    test_results = model.evaluate(test_x, test_y, batch_size=32)
+    print("test loss, test acc:", test_results)
+    with open('./plot/training/attention/test_result/'+rows_num+'_test_result.txt', 'w') as f:
+        f.write("Test loss: {}\n".format(test_results[0]))
+        f.write("Test acc: {}\n".format(test_results[1]))
+
+    joblib.dump(history.history, './plot/training/attention/hist_joblib/'+rows_num+'_hist.joblib')
 
     # model.save('./model.h5')
 
-    plot_graphs(history, "accuracy", 'Attention')
-    plot_graphs(history, "loss", 'Attention')
+    plot_graphs(history, "accuracy", 'Attention', rows_num, target_column)
+    plot_graphs(history, "loss", 'Attention', rows_num, target_column)
 
 def method_4_decisiontree(df):
     """
@@ -440,18 +562,22 @@ def method_5_SVM(df):
     #print(clf.support_) #支援向量點的索引 
     #print(clf.n_support_) #每個class有幾個支援向量點 
 
-def method_6_kag_ANN(df):
+def method_6_kag_ANN(df, target_column, max_length, vocab_size):
     """
     試試看kag的模型，莫名跑出89.5%
     """
+    rows_num = str(len(df.index))
+    df = df.dropna()
+
     # 先移除標點符號
     df['text_remove_puncs'] = df.text.apply(lambda x : punctuation_removal(x))
+
     # 再移除停用字
     df['text_remove_puncs_remove_stopwords'] = df.text_remove_puncs.apply(lambda x : remove_eng_stopwords(x))
-    
+
     X_train, X_test, y_train, y_test = train_test_split(df['text_remove_puncs_remove_stopwords'], df['label'], test_size=config.TEST_SIZE, random_state=123)
     print(X_train.shape, y_train.shape, X_test.shape, y_test.shape)
-    
+
     vect = TfidfVectorizer()
     
     X_train_dtm = vect.fit_transform(X_train)
@@ -463,22 +589,44 @@ def method_6_kag_ANN(df):
     y_test = to_categorical(y_test, num_classes=2)
     #沒有加入batchnormalization也可以到87%
     model=Sequential([
-        Dense(128,activation='relu'),
-        Dropout(0.25),
-        BatchNormalization(),
-        Dense(64,activation='relu'),
-        Dropout(0.25),
-        BatchNormalization(),
-        Dense(2,activation='sigmoid')
+        layers.Dense(128,activation='relu'),
+        layers.Dropout(0.25),
+        layers.BatchNormalization(),
+        layers.Dense(64,activation='relu'),
+        layers.Dropout(0.25),
+        layers.BatchNormalization(),
+        layers.Dense(2,activation='sigmoid')
     ])
 
     model.compile(optimizer='adam',loss="binary_crossentropy",metrics=['accuracy'])
-    earlystopper = EarlyStopping(monitor='val_loss', patience=6, verbose=0)
-    checkpoint =ModelCheckpoint(str(datetime.now().strftime("%d-%m-%Y_%H-%M-%S"))+".hdf5",save_best_only=True)
-    callback_list=[earlystopper,checkpoint]
-    history=model.fit(X_train_dense, y_train, epochs=100, batch_size=config.BATCH_SIZE,validation_split=config.VALIDATION_SIZE,callbacks=callback_list)
 
-#########################################################################################
+    callback_list = [
+        EarlyStopping(patience=15, verbose=0),
+        ModelCheckpoint(
+            filepath='./ann_model/'  + rows_num + '_epoch-{epoch:02d}-val_accuracy-{val_accuracy:.2f}.h5',
+            monitor='val_accuracy',
+            mode='auto',
+            save_best_only=True
+        )
+    ]
+
+    history = model.fit(
+        X_train_dense, 
+        y_train, 
+        epochs=config.EPOCHS, 
+        batch_size=config.BATCH_SIZE,
+        validation_split=config.VALIDATION_SIZE,
+        callbacks=callback_list
+    )
+
+    joblib.dump(history.history, './plot/training/ann/hist_joblib/'+rows_num+'_hist.joblib')
+
+    plot_graphs(history, "accuracy", 'ANN', rows_num, target_column)
+    plot_graphs(history, "loss", 'ANN', rows_num, target_column)
+
+#### 以上為 method 函式 #######################################################################################
+# ----------------------------------------------------------------------------------------------------------#
+#### 以下為資料分析函式 ########################################################################################
 
 def data_analysis(df):
     """
@@ -540,21 +688,89 @@ def data_analysis(df):
 
     return df
 
-def random_select_rows(df):
+#### 以上為資料分析函式 ########################################################################################
+# ----------------------------------------------------------------------------------------------------------#
+#### 以下為訓練不同資料量的函式 #################################################################################
+def train_LSTM_models(df_500, df_1000, df_1500, df_2000, df_2500, df_3000, max_length, vocab_size):
     """
-    隨機選取 500, 1000, ... 2500 筆資料，測試不同資料量在相同演算法的差異
+    一次訓練不同資料量的LSTM模型
+    config.TARGET_COLUMNS[0] = "text"
+    config.TARGET_COLUMNS[1] = "text_remove_puncs_remove_stopwords"
+    config.TARGET_COLUMNS[2] = "text_remove_new_stopwords"
     """
-    df_500 = df.sample(n=500,replace=False)
-    df_1000 = df.sample(n=1000,replace=False)
-    df_1500 = df.sample(n=1500,replace=False)
-    df_2000 = df.sample(n=2000,replace=False)
-    df_2500 = df.sample(n=2500,replace=False)
 
-    return df_500, df_1000, df_1500, df_2000, df_2500, df
+    # 500 rows
+    method_2_LSTM(df_500.reset_index(drop=True), config.TARGET_COLUMNS[1], max_length, vocab_size)
 
+    # 1000 rows
+    method_2_LSTM(df_1000.reset_index(drop=True), config.TARGET_COLUMNS[1], max_length, vocab_size)
+
+    # 1500 rows
+    method_2_LSTM(df_1500.reset_index(drop=True), config.TARGET_COLUMNS[1], max_length, vocab_size)
+
+    # 2000 rows
+    method_2_LSTM(df_2000.reset_index(drop=True), config.TARGET_COLUMNS[1], max_length, vocab_size)
+
+    # 2500 rows
+    method_2_LSTM(df_2500.reset_index(drop=True), config.TARGET_COLUMNS[1], max_length, vocab_size)
+
+    # 3000 rows
+    method_2_LSTM(df_3000.reset_index(drop=True), config.TARGET_COLUMNS[1], max_length, vocab_size)
+
+def train_Transformer_models(df_500, df_1000, df_1500, df_2000, df_2500, df_3000, max_length, vocab_size):
+    """
+    一次訓練不同資料量的 Transformer 模型
+    config.TARGET_COLUMNS[1] = "text_remove_puncs_remove_stopwords"
+    """
+    # 500 rows
+    method_3_Attention(df_500.reset_index(drop=True), config.TARGET_COLUMNS[1], max_length, vocab_size)
+
+    # 1000 rows
+    method_3_Attention(df_1000.reset_index(drop=True), config.TARGET_COLUMNS[1], max_length, vocab_size)
+
+    # 1500 rows
+    method_3_Attention(df_1500.reset_index(drop=True), config.TARGET_COLUMNS[1], max_length, vocab_size)
+
+    # 2000 rows
+    method_3_Attention(df_2000.reset_index(drop=True), config.TARGET_COLUMNS[1], max_length, vocab_size)
+
+    # 2500 rows
+    method_3_Attention(df_2500.reset_index(drop=True), config.TARGET_COLUMNS[1], max_length, vocab_size)
+
+    # 3000 rows
+    method_3_Attention(df_3000.reset_index(drop=True), config.TARGET_COLUMNS[1], max_length, vocab_size)
+
+def train_ANN_models(df_500, df_1000, df_1500, df_2000, df_2500, df_3000, max_length, vocab_size):
+    """
+    一次訓練不同資料量的 ANN 模型
+    config.TARGET_COLUMNS[1] = "text_remove_puncs_remove_stopwords"
+    """
+    # 500 rows
+    method_6_kag_ANN(df_500.reset_index(drop=True), config.TARGET_COLUMNS[1], max_length, vocab_size)
+
+    # 1000 rows
+    method_6_kag_ANN(df_1000.reset_index(drop=True), config.TARGET_COLUMNS[1], max_length, vocab_size)
+
+    # 1500 rows
+    method_6_kag_ANN(df_1500.reset_index(drop=True), config.TARGET_COLUMNS[1], max_length, vocab_size)
+
+    # 2000 rows
+    method_6_kag_ANN(df_2000.reset_index(drop=True), config.TARGET_COLUMNS[1], max_length, vocab_size)
+
+    # 2500 rows
+    method_6_kag_ANN(df_2500.reset_index(drop=True), config.TARGET_COLUMNS[1], max_length, vocab_size)
+
+    # 3000 rows
+    method_6_kag_ANN(df_3000.reset_index(drop=True), config.TARGET_COLUMNS[1], max_length, vocab_size)
+
+#### 以上為訓練不同資料量的函式 #################################################################################
+# ----------------------------------------------------------------------------------------------------------#
+#### 以下為程式主函式 #########################################################################################
 def main():
     """
     英文 NLP - Sentiment analysis
+    hidden layer nodes number 
+    Ref:https://ai.stackexchange.com/questions/3156/how-to-select-number-of-hidden-layers-and-number-of-memory-cells-in-an-lstm
     """
     parser = argparse.ArgumentParser()
     parser.add_argument("-p", "--preprocess", required=False, default="n")
@@ -570,14 +786,9 @@ def main():
         print("read processed data CSV")
         processed_df = pd.read_csv("./processed_data.csv")
 
-    df_500, df_1000, df_1500, df_2000, df_2500, df_3000 = random_select_rows(processed_df)
-    
-    print(len(df_500.index))
-    print(len(df_1000.index))
-    print(len(df_1500.index))
-    print(len(df_2000.index))
-    print(len(df_2500.index))
-    print(len(df_3000.index))
+    df_500, df_1000, df_1500, df_2000, df_2500, df_3000 = select_rows(processed_df)
+
+    # 確認第一筆資料
     # with pd.option_context('display.max_rows', None, 'display.max_columns', None):  # more options can be specified also
     #     print(processed_df.head(1))
 
@@ -586,18 +797,21 @@ def main():
 
     # method_1_ann(X_train, X_test, y_train, y_test)
 
-    # method_2_LSTM(processed_df.reset_index(drop=True), "text_remove_puncs_remove_stopwords")
-    
-    # method_3_Attention(processed_df.reset_index(drop=True), "text")
-    # method_3_Attention(processed_df.reset_index(drop=True), "text_remove_puncs")
-    # method_3_Attention(processed_df.reset_index(drop=True), "text_remove_puncs_remove_stopwords")
-    # method_3_Attention(processed_df.reset_index(drop=True), "text_remove_new_stopwords")
-    # method_3_Attention(processed_df.reset_index(drop=True), "w2v_glove") # 從string轉不回np arr
-    # method_3_Attention(processed_df.reset_index(drop=True), "w2v_tfidf")
+    trainig_set = df_3000[:2400]
+    # max_length = int(trainig_set['text_remove_puncs_remove_stopwords'].str.encode(encoding='utf-8').str.len().max())
+    max_length = 92
+    print("Max length", max_length)
 
-    # method_4_decisiontree(df.reset_index(drop=True))
-    
-    # method_5_SVM(df.reset_index(drop=True))
+    unique_words = set()
+    trainig_set['text_remove_puncs_remove_stopwords'].dropna().str.lower().str.split().apply(unique_words.update)
+    vocab_size = len(unique_words)
+    print("Vocab size: ", vocab_size)
+
+    # train_LSTM_models(df_500, df_1000, df_1500, df_2000, df_2500, df_3000, max_length, vocab_size)
+
+    # train_Transformer_models(df_500, df_1000, df_1500, df_2000, df_2500, df_3000, max_length, vocab_size)
+
+    # train_ANN_models(df_500, df_1000, df_1500, df_2000, df_2500, df_3000, max_length, vocab_size)
 
 if __name__ == "__main__":
     main()

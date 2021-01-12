@@ -56,6 +56,19 @@ class MultiHeadSelfAttention(layers.Layer):
         )  # (batch_size, seq_len, embed_dim)
         return output
 
+    def get_config(self):
+        config = super().get_config().copy()
+        config.update({
+            'embed_dim': self.embed_dim,
+            'num_heads': self.num_heads,
+            'projection_dim': self.projection_dim,
+            'query_dense': self.query_dense,
+            'key_dense': self.key_dense,
+            'value_dense': self.value_dense,
+            'combine_heads': self.combine_heads,
+        })
+        return config
+
 class TransformerBlock(layers.Layer):
     def __init__(self, embed_dim, num_heads, ff_dim, rate=0.1):
         super(TransformerBlock, self).__init__()
@@ -76,6 +89,18 @@ class TransformerBlock(layers.Layer):
         ffn_output = self.dropout2(ffn_output, training=training)
         return self.layernorm2(out1 + ffn_output)
 
+    def get_config(self):
+        config = super().get_config().copy()
+        config.update({
+            'att': self.att,
+            'ffn': self.ffn,
+            'layernorm1': self.layernorm1,
+            'layernorm2': self.layernorm2,
+            'dropout1': self.dropout1,
+            'dropout2': self.dropout2,
+        })
+        return config
+
 class TokenAndPositionEmbedding(layers.Layer):
     def __init__(self, maxlen, vocab_size, embed_dim):
         super(TokenAndPositionEmbedding, self).__init__()
@@ -88,3 +113,11 @@ class TokenAndPositionEmbedding(layers.Layer):
         positions = self.pos_emb(positions)
         x = self.token_emb(x)
         return x + positions
+
+    def get_config(self):
+        config = super().get_config().copy()
+        config.update({
+            'token_emb': self.token_emb,
+            'pos_emb': self.pos_emb,
+        })
+        return config
