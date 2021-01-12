@@ -382,6 +382,60 @@ def method_2_LSTM(df, target_column, max_length, vocab_size):
     plot_graphs(history, "accuracy", 'LSTM', rows_num, target_column)
     plot_graphs(history, "loss", 'LSTM', rows_num, target_column)
 
+def method_2_LSTM_tfidf(df):
+    """
+    嘗試做 word to vector 之後使用 LSTM
+    """
+    vocab_size = 4468
+    max_length = 4468
+    # 先移除標點符號
+    df['text_remove_puncs'] = df.text.apply(lambda x : punctuation_removal(x))
+    # 再移除停用字
+    df['text_remove_puncs_remove_stopwords'] = df.text_remove_puncs.apply(lambda x : remove_eng_stopwords(x))
+
+    X_train, X_test, y_train, y_test = train_test_split(df['text_remove_puncs_remove_stopwords'], df['label'], test_size=config.TEST_SIZE, random_state=123)
+    print(X_train.shape, y_train.shape, X_test.shape, y_test.shape)
+
+    vect = TfidfVectorizer()
+
+    X_train = vect.fit_transform(X_train)
+    X_test = vect.transform(X_test)
+    #X_train_dense = X_train_dtm.todense()
+    #X_test_dense = X_test_dtm.todense()
+    X_train=X_train.toarray()
+    X_test=X_test.toarray()
+    #print(X_train_dense.shape)
+    #y_train = to_categorical(y_train, num_classes=2)
+    #y_test = to_categorical(y_test, num_classes=2)
+    #print(X_train)
+    #print(type(X_train))
+
+    # Create model
+    embedding_dim = 100
+
+    model=tf.keras.Sequential([
+    tf.keras.layers.Embedding(vocab_size,embedding_dim,input_length=max_length),
+    tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(embedding_dim,return_sequences=True)),
+    tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(embedding_dim)),
+    tf.keras.layers.Dense(6,activation='relu'),
+    tf.keras.layers.Dropout(0.2),
+    tf.keras.layers.Dense(1,activation='sigmoid')
+    ])
+
+    my_callbacks = [
+    tf.keras.callbacks.EarlyStopping(patience=6),
+    tf.keras.callbacks.ModelCheckpoint(filepath='model.{epoch:02d}-{val_loss:.2f}.h5',monitor='val_loss',mode='auto',save_best_only=True),
+    ]
+
+    #fit a model
+    model.compile(loss="binary_crossentropy",optimizer='adam',metrics=['accuracy'])
+    model.summary()
+
+    history = model.fit(X_train,y_train,epochs=40,validation_data=(X_test,y_test),callbacks=my_callbacks)
+
+    # plot_graphs(history, "accuracy", 'LSTM')
+    # plot_graphs(history, "loss", 'LSTM')
+
 class WarmUpLearningRateScheduler(keras.callbacks.Callback):
     """Warmup learning rate scheduler
     """
@@ -808,7 +862,7 @@ def main():
     print("Vocab size: ", vocab_size)
 
     # train_LSTM_models(df_500, df_1000, df_1500, df_2000, df_2500, df_3000, max_length, vocab_size)
-
+    method_2_LSTM_tfidf(df_3000.reset_index(drop=True))
     # train_Transformer_models(df_500, df_1000, df_1500, df_2000, df_2500, df_3000, max_length, vocab_size)
 
     # train_ANN_models(df_500, df_1000, df_1500, df_2000, df_2500, df_3000, max_length, vocab_size)
